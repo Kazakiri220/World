@@ -377,8 +377,9 @@ window.WORLD_ENGINE_CORE = (function() {
   }
 
   /** 保存状态并记录当前对话层数（evolve 完成后调用） */
-  function saveStateWithLayer(state) {
-    state.chatLayer = getChatLayer();
+  function saveStateWithLayer(state, layer = getChatLayer()) {
+    state.chatLayer = layer;
+    state.processedThrough = layer;
     saveState(state);
   }
 

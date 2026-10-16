@@ -50,6 +50,7 @@ window.WORLD_ENGINE_CHATCACHE = (function() {
   //   worldbook:   world_engine_worldbook_selection_<id>  (worldbook.js getSelectionKey)
   const SLOTS = {
     state:       id => `world_engine_${id}`,
+    backfill:    id => `world_engine_${id}_backfill`,
     checkpoint:  id => `world_engine_${id}_checkpoint`,
     fingerprint: id => `world_engine_${id}_fingerprint`,
     anchorLayer: id => `world_engine_${id}_anchorLayer`,

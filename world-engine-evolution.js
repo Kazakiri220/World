@@ -1057,6 +1057,9 @@ ${JSON.stringify(sample || [], null, 2)}
       return false;
     }
     _lastError = '';
+    const requestChatId = core.getChatId();
+    const targetLayer = opts?.targetLayer ?? core.getChatLayer();
+    const canCommit = () => core.getChatId() === requestChatId && (!opts?.isCurrent || opts.isCurrent());
 
     delete state._terminalEventsThisRound;
     const hadStoredState = core.hasState();
@@ -1131,6 +1134,7 @@ ${JSON.stringify(sample || [], null, 2)}
       // 第6步：喂给 API 做叙事更新
       const extraInstructions = [regionalIncidentRoll.injectPrompt, distantEventRoll.injectPrompt, nearEventRoll.injectPrompt].filter(Boolean).join('\n\n');
       const update = await callEvolutionAPI(state, userMsg, aiMsg, extraInstructions, (opts && opts.dialogueText) || '');
+      if (!canCommit() || _abortController?.signal.aborted) throw Object.assign(new Error('聊天或任务已变化，已放弃旧请求结果'), { name: 'AbortError' });
 
       // 随机对象先识别并清洗临时标记，再进入既有实体 ID 分配与合并流程。
       acceptDistantEventResult(state, update);
@@ -1316,13 +1320,14 @@ ${JSON.stringify(sample || [], null, 2)}
         // 首次推演不创建空白存档点；后续旧当前状态成为存档点并保留原层数。
         state.round++;                             // 只在 forward 涨轮次
         if (hadStoredState) core.saveCheckpoint(backup);
-        core.saveFingerprint(core.getChatFingerprint());
+        core.saveFingerprint(String(targetLayer));
         console.log('[世界引擎] ✅ 推演完成，新轮次第', state.round, '轮，存档点已推进');
       } else {
         const label = (mode === 'redo') ? 'redo' : '自动重roll';
         console.log('[世界引擎] ✅ 推演完成（' + label + '），轮次不变：第', state.round, '轮');
       }
-      core.saveStateWithLayer(state);
+      if (opts?.backfillJob) state.backfillJob = JSON.parse(JSON.stringify(opts.backfillJob));
+      core.saveStateWithLayer(state, targetLayer);
       return true;
 
     } catch(e) {
@@ -1345,7 +1350,7 @@ ${JSON.stringify(sample || [], null, 2)}
         Object.assign(state, backup);
         if (pendingDistant) state.distantEvent = pendingDistant;
         if (pendingNear) state.nearEvent = pendingNear;
-        core.saveState(state);
+        if (canCommit()) core.saveState(state);
       } catch (_) {}
       return false;
     } finally {
@@ -1378,140 +1383,121 @@ ${JSON.stringify(sample || [], null, 2)}
   // opts: { batchSize, retries, endLayer, onProgress }
   //   onProgress({ phase, batch, totalBatches, layerFrom, layerTo, attempt, ok, round })
   // 返回 { done, totalBatches, completedBatches, failedAt }
-  async function backfillEvolve(opts) {
-    opts = opts || {};
-    if (_isRunning || _backfillRunning) {
-      console.warn('[世界引擎] ⚠️ 已有推演/回填进行中，跳过批量回填');
-      return { done: false, reason: 'busy' };
+  function backfillKey(id = core.getChatId()) { return 'world_engine_' + id + '_backfill'; }
+  function getBackfillJob() {
+    let external = null;
+    try { external = JSON.parse(window.WORLD_ENGINE_STORE.getItem(backfillKey()) || 'null'); } catch (_) {}
+    const committed = core.hasState() ? core.loadState().backfillJob : null;
+    if (!committed) return external;
+    if (!external || (external.id === committed.id && external.nextLayer < committed.nextLayer)) return committed;
+    return external.createdAt >= committed.createdAt ? external : committed;
+  }
+  function backfillDigest(chat, end) {
+    let hash = 2166136261;
+    for (let i = 0; i <= end; i++) {
+      const text = JSON.stringify([!!chat[i]?.is_user, chat[i]?.mes || '', chat[i]?.swipe_id ?? 0]);
+      for (let j = 0; j < text.length; j++) hash = Math.imul(hash ^ text.charCodeAt(j), 16777619) >>> 0;
     }
+    return hash.toString(16);
+  }
 
-    const settings = api && api.getSettings ? api.getSettings(true) : {};
-    const batchSize = Math.max(1, parseInt(opts.batchSize ?? settings.backfillBatchSize) || 1);
-    const retries = Math.max(0, parseInt(opts.retries ?? settings.backfillRetries) || 0);
+  // 范围统一使用酒馆消息下标；每批成功的状态与游标一同提交，刷新后可继续。
+  async function backfillEvolve(opts = {}) {
+    if (_isRunning || _backfillRunning) return { done: false, reason: 'busy' };
+    const settings = api.getSettings(true);
+    const ctx = SillyTavern.getContext();
+    const chat = ctx?.chat || [], id = core.getChatId();
+    if (!id || id === 'default') return { done: false, reason: 'no-chat' };
+    const mode = opts.mode || settings.backfillMode || 'continue';
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
-
-    // 1) 收集所有有效 AI 楼层在 chat 中的下标（与自动推演判据一致：非 user、mes 非空）
-    let chat = [];
-    let startChatId = 'default';
+    const retries = Math.max(0, parseInt(opts.retries ?? settings.backfillRetries) || 0);
+    const isAi = (m, i) => m && !m.is_user && String(m.mes || '').trim() && !(settings.firstLayerIsAiOpening !== false && i === 0);
+    let job;
+    if (mode === 'resume') {
+      job = getBackfillJob();
+      if (!job || job.status === 'done') return { done: false, reason: 'no-job' };
+      if (job.chatId !== id || backfillDigest(chat, job.endLayer) !== job.digest) return { done: false, reason: 'source-changed' };
+    } else {
+      const state = core.hasState() ? core.loadState() : null;
+      const cursor = Number(state?.processedThrough ?? state?.chatLayer);
+      let from = mode === 'rebuild' ? 0 : mode === 'range' ? Math.max(0, parseInt(opts.startLayer ?? settings.backfillStartLayer) || 0)
+        : state && Number.isFinite(cursor) ? cursor + 1 : 0;
+      let to = parseInt(opts.endLayer ?? settings.backfillEndLayer) || chat.length - 1;
+      to = Math.min(chat.length - 1, to);
+      const count = Math.max(0, parseInt(opts.layerCount ?? settings.backfillLayerCount) || 0);
+      if (count) to = Math.min(to, from + count - 1);
+      const indices = chat.map((m, i) => isAi(m, i) && i >= from && i <= to ? i : -1).filter(i => i >= 0);
+      if (!indices.length) return { done: false, reason: 'no-ai-layers' };
+      // 截至最后一个实际 AI 回复；末尾单独的用户消息留待下次处理。
+      to = indices[indices.length - 1];
+      const batchSize = Math.max(1, parseInt(opts.batchSize ?? settings.backfillBatchSize) || 1);
+      job = { v: 1, id: 'bf-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), createdAt: Date.now(),
+        chatId: id, mode, startLayer: from, endLayer: to, nextLayer: from, batchSize,
+        completedBatches: 0, totalBatches: Math.ceil(indices.length / batchSize), status: 'running', digest: backfillDigest(chat, to) };
+    }
+    const key = backfillKey(id);
+    const saveJob = value => window.WORLD_ENGINE_STORE.setItem(key, JSON.stringify(value));
+    const current = () => core.getChatId() === id && !_backfillAborted && backfillDigest(SillyTavern.getContext()?.chat || [], job.endLayer) === job.digest;
+    const result = (done, reason) => ({ done, reason, totalBatches: job.totalBatches, completedBatches: job.completedBatches,
+      failedAt: done ? undefined : job.completedBatches + 1, processedThrough: job.nextLayer - 1 });
+    _backfillRunning = true; _backfillAborted = false;
     try {
-      const ctx = SillyTavern.getContext();
-      chat = (ctx && ctx.chat) || [];
-      if (ctx && ctx.chatId) startChatId = ctx.chatId;
-    } catch (e) { chat = []; }
-    const aiIdx = [];
-    const ignoreFirstLayer = settings.firstLayerIsAiOpening !== false;
-    for (let i = 0; i < chat.length; i++) {
-      const m = chat[i];
-      if (m && !m.is_user && String(m.mes || '').trim() && !(ignoreFirstLayer && i === 0)) aiIdx.push(i);
-    }
-    if (!aiIdx.length) {
-      return { done: false, reason: 'no-ai-layers', totalBatches: 0 };
-    }
-
-    // 2) 结束楼层夹紧（0 或缺省 = 推到最后一个 AI 楼层）
-    let endLayer = parseInt(opts.endLayer ?? settings.backfillEndLayer) || 0;
-    if (!Number.isFinite(endLayer) || endLayer <= 0 || endLayer > aiIdx.length) endLayer = aiIdx.length;
-
-    // 3) 切批：前 endLayer 个 AI 楼层按 batchSize 分组，最后一批吸收余数（不产生空批）
-    const batches = [];
-    for (let p = 0; p < endLayer; p += batchSize) {
-      const pEnd = Math.min(p + batchSize, endLayer) - 1; // 含
-      // 余数并入上一批：若剩余不足一批且已有批，则把它并进最后一批
-      batches.push({ pStart: p, pEnd });
-    }
-    // 合并末尾零头到上一批（如 30/7 → 7/7/7/9 而非 7/7/7/7/2）
-    if (batches.length >= 2) {
-      const last = batches[batches.length - 1];
-      const lastCount = last.pEnd - last.pStart + 1;
-      if (lastCount < batchSize) {
-        batches[batches.length - 2].pEnd = last.pEnd;
-        batches.pop();
+      if (mode !== 'resume') {
+        if (mode === 'rebuild') {
+          core.clearState(); core.clearCheckpoint(); core.saveFingerprint('');
+          window.WORLD_ENGINE_HISTORY?.beginRebuild?.();
+        } else if (mode === 'range') {
+          const history = window.WORLD_ENGINE_HISTORY;
+          if (history?.restoreToLayer) {
+            const restored = history.restoreToLayer(job.startLayer - 1);
+            if (!restored.ok) return result(false, restored.reason || 'no-base');
+          } else {
+            const cp = core.restoreCheckpoint();
+            if (!cp || !Number.isFinite(Number(cp.chatLayer)) || Number(cp.chatLayer) >= job.startLayer) return result(false, 'no-base');
+            core.saveState(cp); core.saveFingerprint(String(cp.chatLayer));
+          }
+        }
+        saveJob(job);
       }
-    }
-    const totalBatches = batches.length;
-
-    // 4) 清空重来：丢弃当前世界状态与存档点，让第 1 批从空白世界起推
-    core.clearState();
-    core.clearCheckpoint();
-
-    _backfillRunning = true;
-    _backfillAborted = false;
-    let completedBatches = 0;
-
-    try {
-      for (let b = 0; b < totalBatches; b++) {
-        if (_backfillAborted) {
-          console.log('[世界引擎] 🛑 批量回填已中止，停在第', b, '/', totalBatches, '批');
-          return { done: false, reason: 'aborted', totalBatches, completedBatches, failedAt: b + 1 };
+      const indices = chat.map((m, i) => isAi(m, i) && i >= job.nextLayer && i <= job.endLayer ? i : -1).filter(i => i >= 0);
+      for (let offset = 0; offset < indices.length; offset += job.batchSize) {
+        if (!current()) {
+          saveJob({ ...job, status: 'paused' });
+          return result(false, core.getChatId() !== id ? 'chat-changed' : _backfillAborted ? 'aborted' : 'source-changed');
         }
-        // 切聊天守卫：回填进行中用户切到别的聊天 → 立即中止，绝不往 B 写。
-        // 否则开头 clearState() 已清空 A，而后续读写用动态 chatId 落到 B，会污染 B 并丢 A 存档。
-        if (core.getChatId() !== startChatId) {
-          console.warn('[世界引擎] 🛑 检测到切聊天，中止批量回填（start', startChatId, '→ now', core.getChatId(), '）');
-          return { done: false, reason: 'chat-changed', totalBatches, completedBatches, failedAt: b + 1 };
-        }
-        const { pStart, pEnd } = batches[b];
-        const lastChatIdx = aiIdx[pEnd];
-        const startChatIdx = pStart === 0 ? (ignoreFirstLayer ? 1 : 0) : aiIdx[pStart - 1] + 1;
-        const aiMsg = String(chat[lastChatIdx].mes || '').trim();
-
-        // 构造本批对话文本（与 performEvolution 一致：含夹在中间的 user 楼层）
-        const dialogueText = chat.slice(startChatIdx, lastChatIdx + 1)
-          .map(m => (m.is_user ? '用户' : 'AI') + '：' + core.filterDialogue(String(m.mes || '').trim(), settings))
-          .filter(line => line.length > 3)
-          .join('\n');
-
-        onProgress({ phase: 'batch-start', batch: b + 1, totalBatches,
-          layerFrom: pStart + 1, layerTo: pEnd + 1, attempt: 0 });
-
-        // 每批重读 state（evolve 已落盘），与单轮路径一致
+        const last = indices[Math.min(offset + job.batchSize, indices.length) - 1];
+        const from = job.nextLayer;
+        const dialogueText = chat.slice(from, last + 1).map(m => (m.is_user ? '用户' : 'AI') + '：' + core.filterDialogue(String(m.mes || '').trim(), settings)).filter(line => line.length > 3).join('\n');
+        const nextJob = { ...job, nextLayer: last + 1, completedBatches: job.completedBatches + 1,
+          status: last === job.endLayer ? 'done' : 'running' };
+        onProgress({ phase: 'batch-start', batch: nextJob.completedBatches, totalBatches: job.totalBatches, layerFrom: from, layerTo: last });
         let ok = false;
-        let lastAttempt = 0;
-        for (let attempt = 0; attempt <= retries; attempt++) {
-          lastAttempt = attempt;
-          if (_backfillAborted) break;
-          if (core.getChatId() !== startChatId) {
-            console.warn('[世界引擎] 🛑 检测到切聊天，中止批量回填（start', startChatId, '→ now', core.getChatId(), '）');
-            return { done: false, reason: 'chat-changed', totalBatches, completedBatches, failedAt: b + 1 };
-          }
-          const state = core.loadState();
-          ok = await evolve(state, '', aiMsg, { mode: 'forward', dialogueText });
-          if (ok || _backfillAborted) break;
-          if (attempt < retries) {
-            console.warn(`[世界引擎] ⚠️ 第 ${b + 1}/${totalBatches} 批 API fault，重试 ${attempt + 1}/${retries}`);
-            onProgress({ phase: 'retry', batch: b + 1, totalBatches,
-              layerFrom: pStart + 1, layerTo: pEnd + 1, attempt: attempt + 1 });
-          }
+        for (let attempt = 0; attempt <= retries && current(); attempt++) {
+          if (attempt) onProgress({ phase: 'retry', batch: nextJob.completedBatches, totalBatches: job.totalBatches, attempt });
+          ok = await evolve(core.loadState(), '', String(chat[last].mes || ''), {
+            mode: 'forward', dialogueText, targetLayer: last, isCurrent: current, backfillJob: nextJob
+          });
+          if (ok) break;
         }
-
         if (!ok) {
-          if (_backfillAborted) {
-            return { done: false, reason: 'aborted', totalBatches, completedBatches, failedAt: b + 1 };
-          }
-          console.error(`[世界引擎] ❌ 第 ${b + 1}/${totalBatches} 批 API fault 重试用尽，中止回填`);
-          onProgress({ phase: 'batch-failed', batch: b + 1, totalBatches,
-            layerFrom: pStart + 1, layerTo: pEnd + 1, attempt: lastAttempt });
-          return { done: false, reason: 'evolve-failed', totalBatches, completedBatches, failedAt: b + 1 };
+          const reason = !current() ? core.getChatId() !== id ? 'chat-changed' : _backfillAborted ? 'aborted' : 'source-changed' : 'evolve-failed';
+          saveJob({ ...job, status: reason === 'evolve-failed' ? 'failed' : 'paused', error: _lastError });
+          return result(false, reason);
         }
-
-        completedBatches++;
-        const cur = core.loadState();
-        if (window.WORLD_ENGINE_LEDGER) {
-          try { window.WORLD_ENGINE_LEDGER.recordChanges(cur); } catch (e) {}
-        }
-        onProgress({ phase: 'batch-done', batch: b + 1, totalBatches,
-          layerFrom: pStart + 1, layerTo: pEnd + 1, attempt: lastAttempt, ok: true, round: cur.round });
+        job = nextJob;
+        saveJob(job);
+        const state = core.loadState();
+        window.WORLD_ENGINE_LEDGER?.recordChanges?.(state);
+        window.WORLD_ENGINE_HISTORY?.commit?.(state, { layer: last, fromLayer: from });
+        onProgress({ phase: 'batch-done', batch: job.completedBatches, totalBatches: job.totalBatches, layerFrom: from, layerTo: last, round: state.round });
       }
-
-      onProgress({ phase: 'all-done', totalBatches, completedBatches });
-      return { done: true, totalBatches, completedBatches };
+      job = { ...job, status: 'done' }; saveJob(job);
+      onProgress({ phase: 'all-done', totalBatches: job.totalBatches, completedBatches: job.completedBatches });
+      return result(true);
     } catch (e) {
-      console.error('[世界引擎] 批量回填异常', e);
-      return { done: false, reason: 'exception', error: String(e && e.message || e), totalBatches, completedBatches };
-    } finally {
-      _backfillRunning = false;
-      _backfillAborted = false;
-    }
+      saveJob({ ...job, status: 'failed', error: String(e.message || e) });
+      return { ...result(false, 'exception'), error: String(e.message || e) };
+    } finally { _backfillRunning = false; _backfillAborted = false; }
   }
 
   function getLastError() {
@@ -1536,5 +1522,5 @@ ${JSON.stringify(sample || [], null, 2)}
     'json-example':  JSON_EXAMPLE
   };
 
-  return { evolve, backfillEvolve, getLastDebug, abort, isRunning, getLastError };
+  return { evolve, backfillEvolve, getBackfillJob, getLastDebug, abort, isRunning, getLastError };
 })();
