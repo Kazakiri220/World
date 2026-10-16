@@ -1172,6 +1172,17 @@ window.WORLD_ENGINE_UI = (function() {
 
     const apiBody = `
       <div class="we-input-group">
+        <label>API 连接</label>
+        <select id="we-api-profile" style="width:100%;">${renderApiConnectionOptions(settings)}</select>
+        <div class="we-hint" id="we-api-profile-hint">保存多个供应商后可直接切换；也可使用酒馆连接配置，无需复制密钥。</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+          <button class="we-btn" id="we-api-profile-new">另存为连接</button>
+          <button class="we-btn" id="we-api-profile-save">更新连接</button>
+          <button class="we-btn" id="we-api-profile-delete">删除连接</button>
+          <button class="we-btn" id="we-api-test">测试连接</button>
+        </div>
+      </div>
+      <div class="we-input-group">
         <label>连接方式</label>
         <select id="we-connection-mode" style="width:100%;">
           <option value="direct" ${settings.connectionMode !== 'proxy' ? 'selected' : ''}>直连（默认）</option>
@@ -3432,6 +3443,95 @@ window.WORLD_ENGINE_UI = (function() {
       + '</div>';
   }
 
+  function renderApiConnectionOptions(settings) {
+    const api = window.WORLD_ENGINE_API;
+    const selected = settings.apiSource === 'tavern' ? 'tavern:' + settings.tavernProfileId
+      : settings.apiProfileId ? 'custom:' + settings.apiProfileId : 'manual';
+    const option = (value, name) => `<option value="${u(value)}" ${selected === value ? 'selected' : ''}>${u(name)}</option>`;
+    let html = option('manual', '手动填写');
+    html += '<optgroup label="已保存的自定义连接">' + (api?.listApiProfiles?.() || []).map(p => option('custom:' + p.id, p.name)).join('') + '</optgroup>';
+    html += '<optgroup label="酒馆连接配置">' + (api?.getTavernProfiles?.() || []).map(p => option('tavern:' + p.id, p.name + (p.model ? ' · ' + p.model : ''))).join('') + '</optgroup>';
+    if (settings.apiSource === 'tavern' && !(api?.getTavernProfiles?.() || []).some(p => p.id === settings.tavernProfileId)) {
+      html += option(selected, '原酒馆连接不可用，请重新选择');
+    }
+    return html;
+  }
+
+  function readApiConnectionForm() {
+    const gv = id => document.getElementById(id)?.value || '';
+    const choice = gv('we-api-profile');
+    return {
+      apiSource: choice.startsWith('tavern:') ? 'tavern' : 'custom',
+      apiProfileId: choice.startsWith('custom:') ? choice.slice(7) : '',
+      tavernProfileId: choice.startsWith('tavern:') ? choice.slice(7) : '',
+      apiUrl: gv('we-api-url'), apiKey: gv('we-api-key'), model: gv('we-model') || 'gpt-3.5-turbo',
+      connectionMode: gv('we-connection-mode') === 'proxy' ? 'proxy' : 'direct'
+    };
+  }
+
+  function bindApiConnectionManager() {
+    const select = document.getElementById('we-api-profile');
+    const api = window.WORLD_ENGINE_API;
+    if (!select || !api) return;
+    const persist = patch => {
+      if (_engineFace === 'memory') return window.MEMORY_ENGINE_SETTINGS.patchSettings(patch);
+      const next = { ...api.getSettings(true), ...patch };
+      window.WORLD_ENGINE_STORE.setItem('world_engine_settings', JSON.stringify(next));
+      return api.getSettings(true);
+    };
+    const updateAvailability = () => {
+      const tavern = select.value.startsWith('tavern:');
+      for (const id of ['we-api-url', 'we-api-key', 'we-model', 'we-connection-mode', 'we-api-profile-new']) {
+        const el = document.getElementById(id); if (el) el.disabled = tavern;
+      }
+      for (const id of ['we-api-profile-save', 'we-api-profile-delete']) {
+        const el = document.getElementById(id); if (el) el.disabled = !select.value.startsWith('custom:');
+      }
+      const hint = document.getElementById('we-api-profile-hint');
+      if (hint) hint.textContent = tavern ? '使用所选酒馆连接的地址、模型和密钥；正文连接不变。温度和输出上限使用下方设置。'
+        : '连接库可供两个引擎选择；各引擎的选择独立保存，密钥不会进入聊天存档。';
+    };
+    const refreshChoices = patch => { select.innerHTML = renderApiConnectionOptions(persist(patch)); updateAvailability(); };
+    select.onchange = () => {
+      if (select.value.startsWith('custom:')) {
+        const p = api.listApiProfiles().find(p => p.id === select.value.slice(7));
+        if (p) for (const [key, id] of Object.entries({ apiUrl: 'we-api-url', apiKey: 'we-api-key', model: 'we-model', connectionMode: 'we-connection-mode' })) {
+          document.getElementById(id).value = p[key] || '';
+        }
+      }
+      persist(readApiConnectionForm()); updateAvailability();
+    };
+    const save = asNew => {
+      try {
+        const existing = api.listApiProfiles().find(p => 'custom:' + p.id === select.value);
+        const name = prompt('连接名称', asNew ? '' : existing?.name || '');
+        if (name == null) return;
+        const p = api.saveApiProfile(name, readApiConnectionForm(), asNew ? null : existing?.id);
+        refreshChoices({ ...readApiConnectionForm(), apiSource: 'custom', apiProfileId: p.id });
+        showToast('连接已保存');
+      } catch (e) { showToast(e.message, true); }
+    };
+    document.getElementById('we-api-profile-new').onclick = () => save(true);
+    document.getElementById('we-api-profile-save').onclick = () => save(false);
+    document.getElementById('we-api-profile-delete').onclick = () => {
+      const id = select.value.slice(7);
+      const p = api.listApiProfiles().find(p => p.id === id);
+      if (!p || !confirm(`删除连接「${p.name}」？当前填写内容仍保留。`)) return;
+      api.deleteApiProfile(id); refreshChoices({ ...readApiConnectionForm(), apiProfileId: '' });
+    };
+    const test = document.getElementById('we-api-test');
+    test.onclick = async () => {
+      const current = _engineFace === 'memory' ? window.MEMORY_ENGINE_SETTINGS.getSettings(true) : api.getSettings(true);
+      test.disabled = true; test.textContent = '测试中…';
+      try {
+        await api.callApi('请只回复 OK。', 16, 0, null, { ...current, ...readApiConnectionForm(), apiTimeoutMs: Math.max(1, Number(document.getElementById('we-api-timeout-sec')?.value) || 30) * 1000 });
+        showToast('连接测试成功');
+      } catch (e) { showToast('连接测试失败：' + e.message, true); }
+      finally { test.disabled = false; test.textContent = '测试连接'; }
+    };
+    updateAvailability();
+  }
+
   function renderSettingsForm() {
     const settings = window.WORLD_ENGINE_API
       ? window.WORLD_ENGINE_API.getSettings(true)
@@ -3458,6 +3558,17 @@ window.WORLD_ENGINE_UI = (function() {
       sectionBody(id, body) + '</div>';
 
     const apiBody = `
+      <div class="we-input-group">
+        <label>API 连接</label>
+        <select id="we-api-profile" style="width:100%;">${renderApiConnectionOptions(settings)}</select>
+        <div class="we-hint" id="we-api-profile-hint">保存多个供应商后可直接切换；也可使用酒馆连接配置，无需复制密钥。</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+          <button class="we-btn" id="we-api-profile-new">另存为连接</button>
+          <button class="we-btn" id="we-api-profile-save">更新连接</button>
+          <button class="we-btn" id="we-api-profile-delete">删除连接</button>
+          <button class="we-btn" id="we-api-test">测试连接</button>
+        </div>
+      </div>
       <div class="we-input-group">
         <label>连接方式</label>
         <select id="we-connection-mode" style="width:100%;">
@@ -4870,6 +4981,7 @@ window.WORLD_ENGINE_UI = (function() {
           engineEnabled: document.getElementById('we-memory-engine-enabled')?.checked !== false,
           firstLayerIsAiOpening: document.getElementById('we-memory-first-layer-ai-opening')?.checked !== false,
           apiUrl: gv('we-api-url') || '',
+          ...readApiConnectionForm(),
           apiKey: gv('we-api-key') || '',
           model: gv('we-model') || 'gpt-3.5-turbo',
           temperature: Number.isFinite(temperatureRaw) ? Math.max(0, temperatureRaw) : 0.2,
@@ -5074,6 +5186,7 @@ window.WORLD_ENGINE_UI = (function() {
           engineEnabled: document.getElementById('we-world-engine-enabled')?.checked !== false,
           firstLayerIsAiOpening: document.getElementById('we-first-layer-ai-opening')?.checked !== false,
           apiUrl: document.getElementById('we-api-url')?.value || '',
+          ...readApiConnectionForm(),
           apiKey: document.getElementById('we-api-key')?.value || '',
           model: document.getElementById('we-model')?.value || 'gpt-3.5-turbo',
           temperature: Number.isFinite(temperatureRaw) ? Math.max(0, temperatureRaw) : 0.7,
@@ -5459,6 +5572,7 @@ window.WORLD_ENGINE_UI = (function() {
       };
     }
 
+    bindApiConnectionManager();
     const fetchBtn = document.getElementById('we-fetch-models');
     if (fetchBtn) {
       fetchBtn.onclick = async () => {
@@ -5467,6 +5581,7 @@ window.WORLD_ENGINE_UI = (function() {
         const requestScope = _engineFace;
         const modelListElement = document.getElementById('we-model-list');
         const apiPatch = {
+          ...readApiConnectionForm(),
           apiUrl: document.getElementById('we-api-url')?.value || '',
           apiKey: document.getElementById('we-api-key')?.value || '',
           model: document.getElementById('we-model')?.value || '',

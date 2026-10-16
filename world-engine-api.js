@@ -7,6 +7,8 @@ window.WORLD_ENGINE_API = (function() {
     apiKey: '',
     model: 'gpt-3.5-turbo',
     connectionMode: 'direct',
+    apiSource: 'custom',
+    tavernProfileId: '',
     temperature: 0.7,
     maxTokens: 65000,
     apiTimeoutMs: 120000
@@ -27,6 +29,9 @@ window.WORLD_ENGINE_API = (function() {
       firstLayerIsAiOpening: true,
       // [FIX] 连接方式：'direct'=浏览器直连（默认，原有行为）；'proxy'=经酒馆服务端转发，绕过第三方 API 的 CORS 限制
       connectionMode: 'direct',
+      apiSource: 'custom',
+      apiProfileId: '',
+      tavernProfileId: '',
       injectIntoPrompt: true,
       injectMaxChars: 5000,
       // 正文注入等级筛选：false=仅注入高等级信息（兼容旧行为），true=事件链与风声不按等级过滤
@@ -115,6 +120,86 @@ window.WORLD_ENGINE_API = (function() {
     }
     cachedSettings = defaults;
     return cachedSettings;
+  }
+
+  // 连接库只存全局 store，绝不进入聊天/世界快照。两个引擎独立选择连接。
+  const PROFILES_KEY = 'world_engine_api_profiles';
+  const CONNECTION_FIELDS = ['apiUrl', 'apiKey', 'model', 'connectionMode'];
+  function connectionFields(value) {
+    return Object.fromEntries(CONNECTION_FIELDS.map(key => [key, value?.[key] ?? REQUEST_DEFAULTS[key]]));
+  }
+  function listApiProfiles() {
+    const raw = window.WORLD_ENGINE_STORE.getItem(PROFILES_KEY);
+    if (raw) {
+      try { const list = JSON.parse(raw); return Array.isArray(list) ? list : []; } catch (_) { return []; }
+    }
+    const list = [];
+    for (const [key, name] of [['world_engine_settings', '原世界连接'], ['memory_engine_settings', '原记忆连接']]) {
+      try {
+        const settings = JSON.parse(window.WORLD_ENGINE_STORE.getItem(key) || '{}');
+        if (!settings.apiUrl) continue;
+        const connection = connectionFields(settings);
+        if (list.some(p => JSON.stringify(connectionFields(p)) === JSON.stringify(connection))) continue;
+        list.push({ id: 'legacy-' + list.length, name, ...connection });
+      } catch (_) {}
+    }
+    window.WORLD_ENGINE_STORE.setItem(PROFILES_KEY, JSON.stringify(list));
+    return list;
+  }
+  function saveApiProfile(name, settings, id) {
+    name = String(name || '').trim().slice(0, 80);
+    if (!name) throw new Error('请输入连接名称');
+    const list = listApiProfiles();
+    const profile = { id: id || 'api-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), name, ...connectionFields(settings) };
+    const index = list.findIndex(p => p.id === profile.id);
+    if (index < 0) list.push(profile); else list[index] = profile;
+    window.WORLD_ENGINE_STORE.setItem(PROFILES_KEY, JSON.stringify(list));
+    return profile;
+  }
+  function deleteApiProfile(id) {
+    window.WORLD_ENGINE_STORE.setItem(PROFILES_KEY, JSON.stringify(listApiProfiles().filter(p => p.id !== id)));
+  }
+  function getTavernProfiles() {
+    try {
+      const ctx = SillyTavern.getContext();
+      if (ctx.extensionSettings?.disabledExtensions?.includes('connection-manager')) return [];
+      const service = ctx.ConnectionManagerRequestService;
+      return service?.getSupportedProfiles ? service.getSupportedProfiles() : (ctx.extensionSettings?.connectionManager?.profiles || []);
+    } catch (_) { return []; }
+  }
+  async function callTavernProfile(settings, body, signal) {
+    const ctx = SillyTavern.getContext();
+    const service = ctx.ConnectionManagerRequestService;
+    if (!service?.sendRequest) throw new Error('当前酒馆版本未提供连接配置请求服务，请升级酒馆或使用自定义连接');
+    if (!settings.tavernProfileId) throw new Error('请先选择酒馆连接配置');
+    const profile = getTavernProfiles().find(p => p.id === settings.tavernProfileId);
+    if (!profile) throw new Error('酒馆连接配置不存在或已禁用，请重新选择');
+    const controller = new AbortController();
+    let timer;
+    const aborted = () => { controller.abort(); };
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener('abort', aborted, { once: true });
+    let rejectAbort;
+    const stopped = new Promise((_, reject) => { rejectAbort = reject; });
+    const onAbort = () => rejectAbort(Object.assign(new Error('已中止'), { name: 'AbortError' }));
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      if (controller.signal.aborted) throw Object.assign(new Error('已中止'), { name: 'AbortError' });
+      if (Number(settings.apiTimeoutMs) > 0) timer = setTimeout(() => {
+        rejectAbort(timeoutError(settings.apiTimeoutMs)); controller.abort();
+      }, Number(settings.apiTimeoutMs));
+      // 指定 profile 发请求，不切换正文连接；密钥由酒馆以 secret-id 解析。
+      const result = await Promise.race([service.sendRequest(profile.id, body.messages, body.max_tokens,
+        { stream: false, signal: controller.signal, extractData: true, includePreset: false, includeInstruct: false },
+        { temperature: body.temperature }), stopped]);
+      const content = typeof result === 'string' ? result : result?.content;
+      if (typeof content !== 'string' || !content.trim()) throw new Error('酒馆连接返回了空内容');
+      return content;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', aborted);
+      controller.signal.removeEventListener('abort', onAbort);
+    }
   }
 
   // [FIX] 规整 chat/completions URL：只补 /chat/completions，不再替用户塞 /v1 等版本前缀。
@@ -283,6 +368,8 @@ window.WORLD_ENGINE_API = (function() {
       max_tokens: selectedMaxTokens
     };
 
+    if (settings.apiSource === 'tavern') return callTavernProfile(settings, body, signal);
+
     // [FIX] 经酒馆代理：绕过第三方 API 的 CORS 限制，由酒馆 Node 服务端转发
     if (settings.connectionMode === 'proxy') {
       return callApiViaProxy(settings, body, signal);
@@ -410,6 +497,11 @@ window.WORLD_ENGINE_API = (function() {
     const settings = settingsOverride
       ? { ...REQUEST_DEFAULTS, ...settingsOverride }
       : getSettings();
+    if (settings.apiSource === 'tavern') {
+      const profile = getTavernProfiles().find(p => p.id === settings.tavernProfileId);
+      if (!profile?.model) throw new Error('请先选择有效的酒馆连接配置');
+      return [profile.model];
+    }
     const baseUrl = normalizeUrl(settings.apiUrl).replace(/\/chat\/completions$/, '');
 
     // [FIX] 经酒馆代理：用酒馆 /status 端点拉模型列表，绕过 CORS
@@ -446,5 +538,5 @@ window.WORLD_ENGINE_API = (function() {
     throw new Error('无法解析模型列表');
   }
 
-  return { callApi, parseJSON, getSettings, fetchModelList };
+  return { callApi, parseJSON, getSettings, fetchModelList, listApiProfiles, saveApiProfile, deleteApiProfile, getTavernProfiles };
 })();
