@@ -148,8 +148,8 @@ window.WORLD_ENGINE_WORLDBOOK = (function() {
     const entries = await module.getSortedEntries();
     return (Array.isArray(entries) ? entries : [])
       .filter(entry => entry && entry.uid !== undefined && String(entry.content || '').trim())
-      // 完全无视 TavernDB-ACU 开头的条目：不显示、不可选、不注入
-      .filter(entry => !getEntryTitle(entry).startsWith('TavernDB-ACU'))
+      // 排除数据库生成条目（含隔离/导入前缀）：不显示、不可选、不注入。
+      .filter(entry => !/^(?:ACU-\[[^\]]*\]-)?(?:外部导入-)?TavernDB-ACU/.test(getEntryTitle(entry)))
       .map(entry => ({
         id: getEntryId(entry),
         uid: entry.uid,

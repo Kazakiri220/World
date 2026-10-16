@@ -56,6 +56,7 @@
         'world-engine-rules-loader.js',
         'world-engine-ledger.js',
         'world-engine-evolution.js',
+        'world-engine-history.js',
         'world-engine-inject.js'
       ],
       contracts: {
@@ -184,6 +185,7 @@
       if (window.WORLD_ENGINE_CHATCACHE) {
         window.WORLD_ENGINE_CHATCACHE.init();
       }
+      window.WORLD_ENGINE_HISTORY?.init?.();
       sharedRuntimeReady = true;
 
       // 注入自检查看器：只读订阅 ST prompt-ready 事件，核对世界状态是否真进了最终 prompt（解耦，订阅失败不阻断启动）
@@ -320,11 +322,13 @@
         }
       }
 
+      // 历史模块先恢复消息对应的状态；以下保留无历史模块时的旧双状态兼容路径。
       // 正文组装前选择注入哪份世界状态：
       //   重 roll（酒馆 type=swipe/regenerate，由调用方传 opts.isReroll）→ 注入存档点（这层正文产生前的状态）；
       //   往前删到旧层（chatLayer < state.chatLayer）→ 注入存档点；
       //   否则（新生成/新轮次/续写）→ 注入当前状态。
       function applyInjectionForCurrentRound(opts) {
+        if (window.WORLD_ENGINE_HISTORY?.isBlocked?.()) { unregisterInjection(); return; }
         if (api.getSettings(true).engineEnabled === false) {
           unregisterInjection();
           return;
@@ -332,6 +336,13 @@
         const state = core.loadState();
         const chatLayer = core.getChatLayer();
         const isReroll = !!(opts && opts.isReroll);
+        if (isReroll && window.WORLD_ENGINE_HISTORY) {
+          // 历史模块已选择当前回复版本或恢复生成前基底，不再二次退到更早的 checkpoint。
+          applyInjection(state);
+          if (ui?.setInjectedScope) ui.setInjectedScope('state');
+          ui?.refresh?.(true);
+          return;
+        }
 
         // [FIX v2.3.19] 重 roll 判据改用酒馆原生 type（swipe/regenerate），不再用 chatLayer===state.chatLayer 数值。
         //   v2.3.18 的纯数值判据有回归：GENERATION_STARTED 在用户楼 push 进 chat **之前** emit，新一轮发消息时
@@ -406,6 +417,7 @@
       async function runAutoEvolution(expectedKey, expectedText) {
         autoEvolveTimer = null;
         if (api.getSettings(true).engineEnabled === false) return;
+        if (window.WORLD_ENGINE_HISTORY?.isBlocked?.()) return;
         if (isEvolving || lastProcessedMessageKey === expectedKey) return;
         // 已有推演（如手动触发）在跑：跳过本次自动推演，避免 evolve() 因 busy 返回 false 被误报为「推演失败」
         if (evolution.isRunning && evolution.isRunning()) return;
@@ -559,6 +571,7 @@
           if (success) {
             ledger.recordChanges(state);
             if (storyDay != null) { state.time = Number(storyDay); core.saveState(state); }
+            window.WORLD_ENGINE_HISTORY?.commit?.(state);
             // 世界 API 已经完成：先落库、更新注入并刷新世界界面，再开始记忆联动。
             // isEvolving 继续作为内部互斥锁保持 true，防止联动期间再次启动世界推演；
             // UI 运行态则在这里结束，让两个引擎的动画严格按先后阶段显示。
@@ -738,6 +751,9 @@
 
       function onMessageSwiped() {
         clearAutoEvolveTimer();
+        lastProcessedMessageKey = '';
+        evolution.abort();
+        window.WORLD_ENGINE_HISTORY?.sync?.();
         // swipe（消息下方左右箭头）：明确的重 roll，注入存档点。
         applyInjectionForCurrentRound({ isReroll: true });
       }
@@ -749,7 +765,15 @@
       //   dryRun（数据库类插件的预热/算 token 生成）→ 不动注入，避免「生成完又注入一遍」。
       function onGenerationStarted(type, _opts, dryRun) {
         if (dryRun) return; // 预热轮不重判注入
+        if (api.getSettings(true).engineEnabled === false) { unregisterInjection(); return; }
         const isReroll = (type === 'swipe' || type === 'regenerate');
+        const history = window.WORLD_ENGINE_HISTORY;
+        history?.invalidateRequests?.();
+        if (evolution.isRunning()) evolution.abort();
+        if (isReroll && history) {
+          const restored = history.restoreToLayer(core.getChatLayer() - 1, { allowBoundary: true });
+          if (!restored.ok) { history.block(); unregisterInjection(); return; }
+        }
         applyInjectionForCurrentRound({ isReroll });
       }
 
@@ -761,6 +785,10 @@
         ctx.eventSource.on(autoEvolveEvent, guard('世界引擎', '生成完成', onMessageReceived));
         ctx.eventSource.on(ctx.event_types?.CHAT_LOADED || 'chat_loaded', guard('世界引擎', '聊天加载', onChatLoaded));
         ctx.eventSource.on(ctx.event_types?.MESSAGE_SWIPED || 'message_swiped', guard('世界引擎', '滑动重生成', onMessageSwiped));
+        ctx.eventSource.on(ctx.event_types?.MESSAGE_DELETED || 'message_deleted', guard('世界引擎', '删除回退', () => {
+          clearAutoEvolveTimer(); lastProcessedMessageKey = ''; evolution.abort();
+          window.WORLD_ENGINE_HISTORY?.sync?.(); applyInjectionForCurrentRound();
+        }));
         ctx.eventSource.on(ctx.event_types?.GENERATION_STARTED || 'generation_started', guard('世界引擎', '生成开始', onGenerationStarted));
         console.log('[世界引擎] 事件绑定成功，自动推演事件:', autoEvolveEvent);
       } else {

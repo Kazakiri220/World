@@ -1057,9 +1057,11 @@ ${JSON.stringify(sample || [], null, 2)}
       return false;
     }
     _lastError = '';
+    if (window.WORLD_ENGINE_HISTORY?.isBlocked?.()) { _lastError = '该位置的世界历史已清理，请从头重建或恢复存档'; return false; }
     const requestChatId = core.getChatId();
     const targetLayer = opts?.targetLayer ?? core.getChatLayer();
-    const canCommit = () => core.getChatId() === requestChatId && (!opts?.isCurrent || opts.isCurrent());
+    const historyGuard = window.WORLD_ENGINE_HISTORY?.captureGuard?.(targetLayer);
+    const canCommit = () => core.getChatId() === requestChatId && (!historyGuard || historyGuard()) && (!opts?.isCurrent || opts.isCurrent());
 
     delete state._terminalEventsThisRound;
     const hadStoredState = core.hasState();
@@ -1327,6 +1329,7 @@ ${JSON.stringify(sample || [], null, 2)}
         console.log('[世界引擎] ✅ 推演完成（' + label + '），轮次不变：第', state.round, '轮');
       }
       if (opts?.backfillJob) state.backfillJob = JSON.parse(JSON.stringify(opts.backfillJob));
+      window.WORLD_ENGINE_HISTORY?.markPending?.(state, { layer: targetLayer, fromLayer: opts?.historyFrom, batched: opts?.batched });
       core.saveStateWithLayer(state, targetLayer);
       return true;
 
@@ -1449,7 +1452,7 @@ ${JSON.stringify(sample || [], null, 2)}
         } else if (mode === 'range') {
           const history = window.WORLD_ENGINE_HISTORY;
           if (history?.restoreToLayer) {
-            const restored = history.restoreToLayer(job.startLayer - 1);
+            const restored = history.restoreToLayer(job.startLayer - 1, { range: true, allowBoundary: true, truncate: true });
             if (!restored.ok) return result(false, restored.reason || 'no-base');
           } else {
             const cp = core.restoreCheckpoint();
@@ -1475,7 +1478,8 @@ ${JSON.stringify(sample || [], null, 2)}
         for (let attempt = 0; attempt <= retries && current(); attempt++) {
           if (attempt) onProgress({ phase: 'retry', batch: nextJob.completedBatches, totalBatches: job.totalBatches, attempt });
           ok = await evolve(core.loadState(), '', String(chat[last].mes || ''), {
-            mode: 'forward', dialogueText, targetLayer: last, isCurrent: current, backfillJob: nextJob
+            mode: 'forward', dialogueText, targetLayer: last, isCurrent: current, backfillJob: nextJob,
+            historyFrom: from, batched: Math.min(job.batchSize, indices.length - offset) > 1
           });
           if (ok) break;
         }

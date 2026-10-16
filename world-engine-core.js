@@ -370,6 +370,7 @@ window.WORLD_ENGINE_CORE = (function() {
     ensureArrays(state);
     state.lastUpdated = { chatId, timestamp: Date.now() };
     window.WORLD_ENGINE_STORE.setItem(key, JSON.stringify(state));
+    window.WORLD_ENGINE_HISTORY?.onStateSaved?.(state);
   }
 
   function clearState() {
@@ -773,6 +774,7 @@ window.WORLD_ENGINE_CORE = (function() {
     delete s.lastInjection;
     delete s.lastUpdated;
     delete s._terminalEventsThisRound;
+    delete s._historyPending; delete s._historyEpoch; delete s._historyNodeId; delete s.backfillJob;
 
     // 修复事件 stageRound>=9
     if (s.events) {
@@ -792,6 +794,7 @@ window.WORLD_ENGINE_CORE = (function() {
     delete clean.lastInjection;
     delete clean.lastUpdated;
     delete clean._terminalEventsThisRound;
+    delete clean._historyPending; delete clean._historyEpoch; delete clean._historyNodeId; delete clean.backfillJob;
     // 修复事件
     if (clean.events) {
       for (const ev of clean.events) ensureEventFields(ev);
@@ -801,6 +804,7 @@ window.WORLD_ENGINE_CORE = (function() {
     clean.lastEvolveResult = null;
     clean.lastInjection = null;
     clean.chatLayer = getChatLayer();
+    clean.processedThrough = clean.chatLayer;
     const chatId = getChatId();
     clean.lastUpdated = { chatId, timestamp: Date.now() };
     ensureArrays(clean);

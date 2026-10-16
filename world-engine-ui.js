@@ -96,6 +96,7 @@ window.WORLD_ENGINE_UI = (function() {
         const current = api?.getSettings?.(true) || {};
         window.WORLD_ENGINE_STORE.setItem('world_engine_settings', JSON.stringify({ ...current, engineEnabled: enabled }));
         api?.getSettings?.(true);
+        if (enabled) window.WORLD_ENGINE_HISTORY?.sync?.();
         window.WORLD_ENGINE?.applyInjection?.();
       },
       isRunning: () => Boolean(_evolving),
@@ -1938,6 +1939,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.1.0', date: '2026-10-16', items: ['新增 API 连接库及酒馆连接配置调用，世界与记忆引擎独立选择连接。', '支持按聊天楼层继续补齐、指定范围重算和从头重建；失败或刷新后可断点续传。', '新增随消息保存的世界历史及回复版本快照，支持删除回退和原生分支/checkpoint继承；手动编辑正文不触发世界更新。', '世界历史默认保留最近200个聊天楼层，可调整或设为不限；定期完整快照与差分记录共同保存。'] },
     { version: '3.0.2', date: '2026-07-19', items: ['放宽事件链的早期创建条件：已有具体迹象的筹划、试探、调查起步或矛盾初现，可以在尚未成熟时进入事件链持续观察。', '放宽风声的传播起点：明确信息主题一旦开始公开发布、被他人听闻或转述、经渠道传递或形成小范围议论，即可创建，不再要求已影响其他持久状态。', '保留事件与风声的归并、去重和合法传播边界，避免放宽准入后产生重复条目或私密信息泄露。'] },
     { version: '3.0.1', date: '2026-07-16', items: ['修复云白、早樱浅色主题下事件链标题与 Lv.2 等级文字接近背景色、难以阅读的问题。', '事件等级、类型、阶段、推演结果、终局印章与倒计时改为浅色主题自适应对比度；深色主题保持原有配色。'] },
     { version: '3.0.0', date: '2026-07-14', items: ['世界引擎进入 3.0 正式版本：继续以独立世界状态推演、分层注入、本地事件机制、可编辑面板与聊天级存档为核心。', '记忆引擎 1.0 正式接入：人物、实体、纪要与总述保持独立数据和故障边界，并可按需向世界推演提供命中的最新人物与实体记忆。', '自动纪要从首次进入聊天时的当前层开始统计新增轮次；历史对话整理仅由纪要与总述批量重填执行。'] },
@@ -3823,7 +3825,13 @@ window.WORLD_ENGINE_UI = (function() {
         <button class="we-btn we-btn-primary" id="we-backfill-start">▶ 按以上设置更新</button>
         <button class="we-btn" id="we-backfill-resume">继续上次任务</button>
         <button class="we-btn" id="we-backfill-stop">■ 停止</button>
-      </div>`;
+      </div>
+      <div class="we-input-group" style="margin-top:12px;"><label>世界历史保留聊天楼层数（0=不限）</label>
+        <input type="number" id="we-history-retention" min="0" step="1" value="${bf('historyRetentionLayers', 200)}">
+        <div class="we-hint">用户和 AI 消息均计入楼层。每次更新自动清理超出范围的世界历史，并保留还原所需基底；不删除正文或数据库数据。命名存档仍由存档列表管理。调大上限不会找回已清理的历史。</div>
+      </div>
+      <div class="we-hint" id="we-history-status"></div>
+      <button class="we-btn" id="we-history-prune">按上限清理世界历史</button>`;
 
     // [FIX] 选项卡化：返回按 section 分好的片段字典，由 renderSettingsView 归入各选项卡。
     //   每个 sec(...) 调用、body 内容、字段 id 与原先一字不改，只是不再直接拼成一串。
@@ -5210,6 +5218,7 @@ window.WORLD_ENGINE_UI = (function() {
           memoryLinkEnabled: document.getElementById('we-memory-link-enabled')?.checked === true,
           syncToChat: document.getElementById('we-sync-to-chat')?.checked === true,
           autoBackup: document.getElementById('we-auto-backup')?.checked === true,
+          historyRetentionLayers: Math.max(0, parseInt(gv('we-history-retention')) || 0),
           evolveMode: (_modeRaw === 'manual' || _modeRaw === 'time') ? _modeRaw : 'auto',
           evolveEveryX: Math.max(1, parseInt(document.getElementById('we-evolve-everyx')?.value) || 1),
           evolveReadRounds: Math.max(1, parseInt(document.getElementById('we-evolve-readrounds')?.value) || 1),
@@ -5275,6 +5284,7 @@ window.WORLD_ENGINE_UI = (function() {
         ns.evolveReadRounds = Math.min(ns.evolveReadRounds, ns.evolveEveryX);
         window.WORLD_ENGINE_STORE.setItem('world_engine_settings', JSON.stringify(ns));
         if (window.WORLD_ENGINE_API) window.WORLD_ENGINE_API.getSettings(true);
+        if (ns.engineEnabled) window.WORLD_ENGINE_HISTORY?.sync?.();
 
         // [FIX] 保存后校验正则过滤：复用 core.validateFilterRegex。非法条目不阻止保存（与现有数值 clamp 范式一致），
         //   但在状态行展示生效/失败+原因，按是否有失败调整下方 toast。
@@ -5549,6 +5559,7 @@ window.WORLD_ENGINE_UI = (function() {
           core.clearState();
           core.clearCheckpoint();
           core.saveFingerprint(String(core.getChatLayer()));
+          window.WORLD_ENGINE_HISTORY?.rebase?.();
           showToast('世界已重置');
           refresh();
         }
@@ -5926,6 +5937,19 @@ window.WORLD_ENGINE_UI = (function() {
       if (batchEl) batchEl.onchange = () => persistBf('backfillBatchSize', Math.max(1, parseInt(batchEl.value) || 1));
       if (endEl) endEl.onchange = () => persistBf('backfillEndLayer', Math.max(0, parseInt(endEl.value) || 0));
       if (retriesEl) retriesEl.onchange = () => persistBf('backfillRetries', Math.max(0, parseInt(retriesEl.value) || 0));
+      const retention = document.getElementById('we-history-retention');
+      const historyStatus = document.getElementById('we-history-status');
+      const describeHistory = () => {
+        const s = window.WORLD_ENGINE_HISTORY?.getStatus?.();
+        if (s && historyStatus) historyStatus.textContent = `${s.blocked ? '此位置的历史不可用；' : ''}最早可回退第 ${s.earliestLayer} 楼，已更新到第 ${s.processedThrough ?? '—'} 楼；${s.snapshots} 份历史，约 ${(s.bytes / 1024).toFixed(1)} KB`;
+      };
+      if (retention) retention.onchange = () => persistBf('historyRetentionLayers', Math.max(0, parseInt(retention.value) || 0));
+      const pruneBtn = document.getElementById('we-history-prune');
+      if (pruneBtn) pruneBtn.onclick = () => {
+        retention?.onchange?.(); window.WORLD_ENGINE_HISTORY?.prune?.(); describeHistory();
+        showToast('已按聊天楼层上限清理世界历史');
+      };
+      describeHistory();
 
       startBtn.onclick = () => runBackfill();
       const resumeBtn = document.getElementById('we-backfill-resume');

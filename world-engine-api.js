@@ -50,6 +50,7 @@ window.WORLD_ENGINE_API = (function() {
       backfillMode: 'continue',
       backfillStartLayer: 0,
       backfillLayerCount: 0,
+      historyRetentionLayers: 200, // 按酒馆聊天楼层保留世界历史；0 = 不限。
       evolveEveryX: 1,
       evolveReadRounds: 1,
       manualReadRounds: 1,

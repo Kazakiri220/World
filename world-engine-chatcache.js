@@ -387,6 +387,7 @@ window.WORLD_ENGINE_CHATCACHE = (function() {
     }
     installPack(snap.data, id, true);
     normalizeAfterRestore(id); // 楼层/指纹归一化到当前层数，避免被误判为重 roll（与「数据导入」一致）
+    window.WORLD_ENGINE_HISTORY?.rebase?.();
     // 在同一个 ns 上更新 live（指向恢复后的状态），最后只落盘一次，避免两次 writeNamespace 互相覆盖
     let revToSet = null;
     if (syncEnabled()) revToSet = pushLiveNow(ns, true); // force：恢复后即使内容相同也要把 live 指向恢复后的状态，避免下次 onChatLoaded 被云端旧值覆盖
@@ -402,7 +403,7 @@ window.WORLD_ENGINE_CHATCACHE = (function() {
     try {
       const stateRaw = store().getItem(SLOTS.state(id));
       if (stateRaw != null) {
-        const st = JSON.parse(stateRaw); st.chatLayer = layer;
+        const st = JSON.parse(stateRaw); st.chatLayer = layer; st.processedThrough = layer; delete st.backfillJob;
         store().setItem(SLOTS.state(id), JSON.stringify(st));
       }
       const cpRaw = store().getItem(SLOTS.checkpoint(id));
