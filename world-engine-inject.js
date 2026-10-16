@@ -84,6 +84,8 @@ window.WORLD_ENGINE_INJECT = (function() {
   };
 
   function buildContext(worldState, tags) {
+    const time = window.WORLD_ENGINE_TIME;
+    const timeText = item => { const value = time?.brief(item); return value ? `［${value}］` : ''; };
     const rulesLoader = window.WORLD_ENGINE_RULES;
     const rulesSummary = rulesLoader ? rulesLoader.getCoreRulesSummary() : '';
     let injectAllLevels = false;
@@ -103,6 +105,7 @@ window.WORLD_ENGINE_INJECT = (function() {
       const typeName = e.type === 'progress' ? '发展事件' : '冲突事件';
       let txt = `${e.name}（${typeName}，等级 ${e.level}） ${e.stage} ${e.stageRound||1}/9`;
       if (e.evolveResult) txt += ` [${e.evolveResult}]`;
+      txt += timeText(e);
       return txt;
     }).join('；') || '无';
 
@@ -124,6 +127,7 @@ window.WORLD_ENGINE_INJECT = (function() {
           if (f.core_person) tail.push(`核心人物是${f.core_person}`);
           if (f.powerPillars?.length) tail.push(`主要资源或能力来源为${formatPillars(f.powerPillars)}`);
           if (tail.length) s += tail.join('，') + '。';
+          s += timeText(f);
           return s;
         }).join('\n')
       : '无';
@@ -132,12 +136,12 @@ window.WORLD_ENGINE_INJECT = (function() {
     const windTypeNames = { announcement: '公告', report: '消息', rumor: '流言', sentiment: '舆情' };
     const visibleWinds = (worldState.winds || []).filter(w => injectAllLevels || (w.level || 0) >= 3);
     const windsText = visibleWinds.map(w =>
-      `[${windTypeNames[w.type] || '信息'} 等级 ${w.level || 1} ${w.scope || '?'}] ${w.content}`
+      `[${windTypeNames[w.type] || '信息'} 等级 ${w.level || 1} ${w.scope || '?'}] ${w.content}${timeText(w)}`
     ).join('；') || '无';
 
     // 天下大势
     const trendsText = (worldState.worldTrends || []).filter(t => t.status !== '已结束').map(t =>
-      `${t.name}（${t.scope || '全局'}）：${t.description}`
+      `${t.name}（${t.scope || '全局'}）：${t.description}${timeText(t)}`
     ).join('；') || '无';
 
     // 声誉：注入人话判词，而非光秃秃的等级标签
@@ -148,20 +152,20 @@ window.WORLD_ENGINE_INJECT = (function() {
       if (!verdict) return '';
       return `${REP_DIM_NAME[k]}：评价等级为${REP_LEVEL_NAME[lv] || lv}；${verdict}`;
     }).filter(Boolean).join('。') + '。';
-    const repChange = rep.lastChange ? `（${rep.lastChange}）` : '';
+    const repChange = (rep.lastChange ? `（${rep.lastChange}）` : '') + timeText(rep);
 
     // 经济信号：全注入
     const econ = worldState.economy || {};
-    const signalsText = (econ.signals || []).map(s => `${s.summary}（${s.scope}）`).join('；');
+    const signalsText = (econ.signals || []).map(s => `${s.summary}（${s.scope}）${timeText(s)}`).join('；');
     const climate = econ.climate || '平稳';
     const climateText = `市场状态为${climate}：${CLIMATE_VERDICT[climate] || CLIMATE_VERDICT['平稳']}`;
-    const econText = `${climateText}${signalsText ? '。市场信号：' + signalsText : ''}`;
+    const econText = `${climateText}${timeText(econ)}${signalsText ? '。市场信号：' + signalsText : ''}`;
 
     // 仇敌录
     let enemiesText = '无';
     if (worldState.enemies && worldState.enemies.length) {
       enemiesText = worldState.enemies.map(e =>
-        `${e.name}（${e.type==='blood'?'严重对立':'一般对立'}，${e.status}，原因：${e.reason}）`
+        `${e.name}（${e.type==='blood'?'严重对立':'一般对立'}，${e.status}，原因：${e.reason}）${timeText(e)}`
       ).join('；');
     }
 
@@ -170,6 +174,7 @@ window.WORLD_ENGINE_INJECT = (function() {
     let riText = '';
     if (ri.active) {
       riText = `⚠️ ${ri.title || '区域突发事件'}（${ri.type || '?'}，${ri.scope || '?'}）— ${ri.impact || ''}`;
+      riText += timeText(ri);
     } else {
       riText = ri.title && ri.title.includes('重试') ? `⚠️ ${ri.title}` : '本轮无新增区域事件';
     }
@@ -179,13 +184,13 @@ window.WORLD_ENGINE_INJECT = (function() {
     const boxParts = [];
     if (blackbox.secretActions?.length) {
       const actionsText = blackbox.secretActions.map(a =>
-        `[行为] ${a.action || '?'}（目击:${a.witnesses || '无'}）`
+        `[行为] ${a.action || '?'}（目击:${a.witnesses || '无'}）${timeText(a)}`
       ).join('；');
       boxParts.push(`未公开行为(${blackbox.secretActions.length})：${actionsText}`);
     }
     if (blackbox.secretAssets?.length) {
       const assetsText = blackbox.secretAssets.map(a =>
-        `[资产] ${a.name || '?'}（暴露:${a.exposure || 0}%，${a.status || '有效'}）`
+        `[资产] ${a.name || '?'}（暴露:${a.exposure || 0}%，${a.status || '有效'}）${timeText(a)}`
       ).join('；');
       boxParts.push(`未公开资源(${blackbox.secretAssets.length})：${assetsText}`);
     }
@@ -194,6 +199,7 @@ window.WORLD_ENGINE_INJECT = (function() {
     const context = `
 【世界信息】
 更新轮次：${worldState.round}
+剧情时间：${time?.format(worldState.storyTime) || '未知'}（世界状态截至此时；正文可能继续推进时间）
 摘要：${worldState.worldDigest}
 全局动态：${trendsText}
 进行中的事件：${eventsText}

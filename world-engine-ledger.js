@@ -42,7 +42,8 @@ window.WORLD_ENGINE_LEDGER = (function() {
           eventType: ev.type || 'conflict',
           level: ev.level,
           stage: ev.stage || '?',
-          desc: ev.desc || ''
+          desc: ev.desc || '',
+          time: ev.time || null
         });
       } else if (cpEv.stage !== ev.stage) {
         changes.push({
@@ -52,7 +53,8 @@ window.WORLD_ENGINE_LEDGER = (function() {
           fromStage: cpEv.stage || '?',
           toStage: ev.stage || '?',
           stage: ev.stage || '?',
-          desc: ev.desc || ''
+          desc: ev.desc || '',
+          time: ev.time || null
         });
       }
     }
@@ -65,7 +67,8 @@ window.WORLD_ENGINE_LEDGER = (function() {
           type: 'wind_new',
           topic: wind.topic,
           level: wind.level,
-          content: wind.content || ''
+          content: wind.content || '',
+          time: wind.time || null
         });
       }
     }
@@ -86,6 +89,7 @@ window.WORLD_ENGINE_LEDGER = (function() {
       id: `ledger_${state.round}`,
       type: 'ledger',
       round: state.round,
+      storyTime: state.storyTime || null,
       changes: changes
     });
 
@@ -104,8 +108,11 @@ window.WORLD_ENGINE_LEDGER = (function() {
     if (!entries.length) return '暂无重大事件记录';
 
     return entries.map(entry => {
-      const lines = [`第${entry.round}轮（${entry.changes.length}条变化）：`];
+      const when = window.WORLD_ENGINE_TIME?.format(entry.storyTime) || '未知';
+      const lines = [`第${entry.round}轮 · 剧情时间：${when}（${entry.changes.length}条变化）：`];
       for (const c of entry.changes) {
+        const whenChanged = window.WORLD_ENGINE_TIME?.brief(c);
+        if (whenChanged) lines.push(`  [时间] ${whenChanged}`);
         if (c.type === 'event_new') {
           const tn = EVENT_TYPE_NAMES[c.eventType] || c.eventType;
           lines.push(`  [新增Lv${c.level}${tn}事件链] ${c.name} - ${c.stage} - ${c.desc}`);

@@ -1,8 +1,8 @@
 {
   "display_name": "🌍 世界引擎",
   "author": "Disnight",
-  "description": "独立 API 世界推演引擎：API 连接管理与酒馆连接配置调用；按聊天楼层范围更新、断点续传；随消息保存世界历史，支持删除回退及原生分支/checkpoint继承，可设置历史保留楼层数；支持聊天同步、世界书触发及独立记忆引擎。",
-  "version": "3.1.0",
+  "description": "独立 API 世界推演引擎：API 连接管理与酒馆连接配置调用；按聊天楼层范围更新、断点续传；随消息保存世界历史，支持删除回退及原生分支/checkpoint继承，可设置历史保留楼层数；世界信息支持剧情时间标注与手动修正；支持聊天同步、世界书触发及独立记忆引擎。",
+  "version": "3.2.0",
   "license": "MIT",
   "type": "extension",
   "js": "world-engine.js",

@@ -52,6 +52,7 @@
   const ENGINE_MODULE_GROUPS = [
     {
       id: 'world', label: '世界引擎', modules: [
+        'world-engine-time.js',
         'world-engine-preset.js',
         'world-engine-rules-loader.js',
         'world-engine-ledger.js',
@@ -60,6 +61,7 @@
         'world-engine-inject.js'
       ],
       contracts: {
+        WORLD_ENGINE_TIME: ['normalizeState', 'apply', 'finalizeResult', 'format'],
         WORLD_ENGINE_PRESET: ['getActivePreset'],
         WORLD_ENGINE_RULES: ['loadRules'],
         WORLD_ENGINE_LEDGER: ['recordChanges'],

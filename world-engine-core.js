@@ -31,6 +31,7 @@ window.WORLD_ENGINE_CORE = (function() {
   function getDefaultState() {
     return {
       round: 0,
+      storyTime: null,
       worldDigest: '世界正在苏醒，一切尚未可知。',
       events: [],
       factions: [],
@@ -330,6 +331,7 @@ window.WORLD_ENGINE_CORE = (function() {
       state.blackbox.secretAssets = state.blackbox.secretAssets || [];
     }
     state.lastInjection = state.lastInjection || null;
+    window.WORLD_ENGINE_TIME?.normalizeState?.(state);
     return state;
   }
 

@@ -19,7 +19,7 @@ function harness(values = new Map(), context = null, request = null) {
   };
   sandbox.window = sandbox;
   const run = file => vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox, { filename: file });
-  run('world-engine-core.js'); run('world-engine-ledger.js'); run('world-engine-evolution.js');
+  run('world-engine-core.js'); run('world-engine-time.js'); run('world-engine-ledger.js'); run('world-engine-evolution.js');
   return { sandbox, values, context, settings, core: sandbox.WORLD_ENGINE_CORE, evo: sandbox.WORLD_ENGINE_EVOLUTION,
     allowAll: () => { failAt = -1; }, calls: () => calls };
 }

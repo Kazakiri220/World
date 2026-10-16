@@ -328,6 +328,7 @@ window.WORLD_ENGINE_UI = (function() {
             <button class="we-panel-title we-engine-face-toggle" type="button" title="切换到记忆引擎" aria-label="切换到记忆引擎">世界引擎</button>
             <span class="we-panel-version" id="we-panel-version"></span><!-- [FIX] 版本号 -->
             <span class="we-header-round" id="we-header-round"></span>
+            <span class="we-header-story-time" id="we-header-story-time"></span>
           </div>
           <div class="we-header-mood" id="we-header-mood">
             <span class="we-header-dot"></span>
@@ -1636,6 +1637,7 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function isEditingPanelContent() {
+    if (panelBodyElement?.querySelector('.we-time-annotations[open]')) return true;
     if (editingEvent || editingFaction || editingWind || editingTrend || editingDigest ||
         editingEnemy || editingInfluence || editingRI || editingSecret || _memoryEditingPerson ||
         _memoryEditingEntity || _memoryEditingSmall || _memoryEditingBig) return true;
@@ -1814,6 +1816,11 @@ window.WORLD_ENGINE_UI = (function() {
 
   /** 刷新头部的「第X轮 + 稳定度小字」 */
   function updatePanelHeader(state, layer) {
+    const storyTimeEl = document.getElementById('we-header-story-time');
+    if (storyTimeEl) {
+      storyTimeEl.hidden = false;
+      storyTimeEl.textContent = '剧情时间：' + (window.WORLD_ENGINE_TIME?.format(state?.storyTime) || '未知');
+    }
     const roundEl = document.getElementById('we-header-round');
     if (roundEl) {
       const layerText = (layer !== undefined && layer !== null && layer !== '-') ? ' · 第 ' + layer + ' 层' : '';
@@ -1852,9 +1859,42 @@ window.WORLD_ENGINE_UI = (function() {
     return '<div class="we-section we-digest-card" id="we-sec-digest">'
       + '<div class="we-section-title">世界摘要</div>'
       + editor
+      + renderStoryClock(s, scope)
       + '<div class="we-event-actions">'
       + '<button class="we-icon-btn we-digest-edit" data-digest-scope="' + h(scope) + '" title="编辑"><i class="fa-solid fa-pen"></i></button>'
       + '</div></div>';
+  }
+
+  function describeTimeSource(value) {
+    if (!value) return '来源：未知';
+    return `来源：${value.source === 'manual' ? '手动填写' : value.source === 'inherited' ? '沿用此前时间' : '正文提取'}${value.sourceLayer != null ? ' · 处理至第 ' + value.sourceLayer + ' 楼' : ''}${value.evidence ? ' · ' + value.evidence : ''}`;
+  }
+
+  function renderStoryClock(state, scope) {
+    if (!window.WORLD_ENGINE_TIME) return '';
+    return `<details class="we-time-annotations" data-time-scope="${h(scope || 'state')}" data-time-path="storyTime">
+      <summary>剧情时间：${h(window.WORLD_ENGINE_TIME.format(state.storyTime))} · 修改</summary>
+      <div class="we-time-fields"><label>当前剧情时间<input data-time-field="storyTime" maxlength="160" value="${h(state.storyTime?.text || '')}" placeholder="留空表示未知；支持虚构纪年"></label></div>
+      <p class="we-time-source">${h(describeTimeSource(state.storyTime))}</p>
+      <p class="we-time-help">填写故事中的时间，保留已知精度。此处修正世界时间标注。</p>
+      <button class="we-btn we-time-save">保存时间</button>
+    </details>`;
+  }
+
+  function renderTimeInfo(item, scope, path, index) {
+    const api = window.WORLD_ENGINE_TIME;
+    if (!api || !item || typeof item !== 'object') return '';
+    const fields = api.FIELDS.map(key => {
+      const value = item.time?.[key];
+      const source = describeTimeSource(value);
+      return `<label title="${h(source)}">${h(api.LABELS[key])}${value?.source === 'inherited' ? '（沿用）' : ''}<input data-time-field="${key}" maxlength="160" value="${h(value?.text || '')}" placeholder="未知"><span class="we-time-source">${h(source)}</span></label>`;
+    }).join('');
+    return `<details class="we-time-annotations" data-time-scope="${h(scope || 'state')}" data-time-path="${h(path)}"${index == null ? '' : ' data-time-index="' + index + '"'}>
+      <summary>${h(api.brief(item) || '时间：未知')} · 详情／修改</summary>
+      <div class="we-time-fields">${fields}</div>
+      <p class="we-time-help">剧情时间；首次记录与实际发生时间分别保存。留空表示未知。</p>
+      <button class="we-btn we-time-save">保存时间</button>
+    </details>`;
   }
 
   function renderHomeView(s, layer, scope) {
@@ -1939,6 +1979,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.2.0', date: '2026-10-16', items: ['世界状态和事件、风声等信息增加剧情时间标注，分别记录首次记录、最近变化、实际发生及预计/截止时间。', '与世界推演共用请求，从本次正文提取时间并核验原文依据；未知、沿用及手动修正分别保存。', '面板支持查看和修改时间，推演上下文、正文注入和重大事件账本同步携带时间。', '回填按目标历史正文提取，楼层回退与分支同步恢复；旧存档缺失时间保持未知，现有按轮机制继续保留。'] },
     { version: '3.1.0', date: '2026-10-16', items: ['新增 API 连接库及酒馆连接配置调用，世界与记忆引擎独立选择连接。', '支持按聊天楼层继续补齐、指定范围重算和从头重建；失败或刷新后可断点续传。', '新增随消息保存的世界历史及回复版本快照，支持删除回退和原生分支/checkpoint继承；手动编辑正文不触发世界更新。', '世界历史默认保留最近200个聊天楼层，可调整或设为不限；定期完整快照与差分记录共同保存。'] },
     { version: '3.0.2', date: '2026-07-19', items: ['放宽事件链的早期创建条件：已有具体迹象的筹划、试探、调查起步或矛盾初现，可以在尚未成熟时进入事件链持续观察。', '放宽风声的传播起点：明确信息主题一旦开始公开发布、被他人听闻或转述、经渠道传递或形成小范围议论，即可创建，不再要求已影响其他持久状态。', '保留事件与风声的归并、去重和合法传播边界，避免放宽准入后产生重复条目或私密信息泄露。'] },
     { version: '3.0.1', date: '2026-07-16', items: ['修复云白、早樱浅色主题下事件链标题与 Lv.2 等级文字接近背景色、难以阅读的问题。', '事件等级、类型、阶段、推演结果、终局印章与倒计时改为浅色主题自适应对比度；深色主题保持原有配色。'] },
@@ -2328,6 +2369,7 @@ window.WORLD_ENGINE_UI = (function() {
         ${stampHtml}
         <div class="we-event-name"><span class="we-event-title">${u(e.name)}</span> <span class="we-badge we-event-level-badge">Lv.${e.level||'?'}</span> <span class="we-badge we-event-type-badge">${typeName}</span>${countdownHtml}${stageBadge}${extras}</div>
         ${metaText ? `<div class="we-event-meta" ${metaStyle}>${metaText}</div>` : ''}
+        ${renderTimeInfo(e, scope, 'events', eventIndex)}
         ${editHtml}
         ${actionHtml}
         ${progressHtml}
@@ -2418,6 +2460,7 @@ window.WORLD_ENGINE_UI = (function() {
         ${f.currentGoal ? `<div class="we-faction-goal">${u(f.currentGoal)}</div>` : ''}
         ${f.core_person ? `<div class="we-faction-meta">核心人物: ${u(f.core_person)}</div>` : ''}
         ${pillarsHtml}
+        ${renderTimeInfo(f, scope, 'factions', factionIndex)}
         ${actionHtml}
         ${editHtml}
       </div>`;
@@ -2472,6 +2515,7 @@ window.WORLD_ENGINE_UI = (function() {
         <div class="we-trend-scope">${u(trend.scope || '天下')}</div>
         <div class="we-trend-description">${u(trend.description || '?')}</div>
         <div class="we-trend-source"><span>来源</span>${u(trend.source || '?')}</div>
+        ${renderTimeInfo(trend, scope, 'worldTrends', trendIndex)}
         ${editHtml}
       </div>`;
     });
@@ -2533,6 +2577,7 @@ window.WORLD_ENGINE_UI = (function() {
       html += '<div class="we-wind-field we-wind-content"><span class="we-wind-label">内容</span><span>' + u(w.content || '?') + '</span></div>';
       html += '<div class="we-wind-field"><span class="we-wind-label">范围</span><span>' + u(w.scope || '?') + '</span></div>';
       html += '<div class="we-wind-field"><span class="we-wind-label">来源</span><span>' + u(w.source || '?') + '</span></div>';
+      html += renderTimeInfo(w, scope, 'winds', windIndex);
       html += editHtml;
       html += actionHtml;
       html += '</div>';
@@ -2576,7 +2621,7 @@ window.WORLD_ENGINE_UI = (function() {
       shadow:    { '天怒人怨':'绿林亦不肯纳', '声名狼藉':'豪杰闻而鄙之', '默默无闻':'混迹渔樵无人问', '受人尊敬':'江湖豪杰多归之', '万众敬仰':'四海之内皆称其侠' },
       circuit:   { '天怒人怨':'同辈羞与为伍', '声名狼藉':'友朋面斥其非', '默默无闻':'独行无人与语', '受人尊敬':'同门推为领袖', '万众敬仰':'吾辈望之如泰山' }
     };
-    return '<div class="we-rep-grid">' + Object.entries(rep).filter(([k]) => k !== 'lastChange').map(([key, rawVal]) => {
+    return renderTimeInfo(rep, scope, 'reputation') + '<div class="we-rep-grid">' + Object.entries(rep).filter(([k]) => Object.prototype.hasOwnProperty.call(dimLabels, k)).map(([key, rawVal]) => {
       const val = legacyMap[rawVal] || rawVal;
       const cn = dimLabels[key] || key;
       const idx = levels.indexOf(val);
@@ -2603,7 +2648,7 @@ window.WORLD_ENGINE_UI = (function() {
     const climateBg = { '繁荣': 'rgba(62,207,142,0.08)', '平稳': 'rgba(122,138,154,0.06)', '衰退': 'rgba(217,163,74,0.08)', '动荡': 'rgba(224,85,85,0.08)' };
     const climate = econ.climate || '平稳';
     const cColor = climateColors[climate] || '#7a8a9a';
-    let html = '<div class="we-climate-bar" style="background:' + (climateBg[climate]||'rgba(122,138,154,0.06)') + ';">';
+    let html = renderTimeInfo(econ, sc, 'economy') + '<div class="we-climate-bar" style="background:' + (climateBg[climate]||'rgba(122,138,154,0.06)') + ';">';
     html += '<span class="we-climate-dot" style="background:' + cColor + ';box-shadow:0 0 8px ' + cColor + '88;"></span>';
     html += '<span class="we-climate-label" style="color:' + cColor + '">' + climate + '</span>';
     html += '<div class="we-climate-btns">';
@@ -2616,6 +2661,7 @@ window.WORLD_ENGINE_UI = (function() {
         '<div class="we-signal-item" data-sig-scope="' + sc + '">' +
         '<span class="we-signal-summary">' + u(s.summary||s) + '</span>' +
         '<span class="we-signal-scope">' + u(s.scope||'?') + '</span>' +
+        renderTimeInfo(s, sc, 'economy.signals', i) +
         '<span class="we-signal-del" data-sig-scope="' + sc + '" data-sigidx="' + i + '" title="删除信号">✕</span>' +
         '</div>'
       );
@@ -2641,6 +2687,7 @@ window.WORLD_ENGINE_UI = (function() {
         ${actionHtml}
         <div class="we-blood-title">${u(en.name)} <span class="we-badge we-badge-danger">${en.status||'追踪中'}</span><span class="we-badge" style="background:var(--we-purple);font-size:10px;">${en.type==='blood'?'血仇':'恩怨'}</span></div>
         <div class="we-blood-meta">原因: ${u(en.reason||'?')}</div>
+        ${renderTimeInfo(en, scope, 'enemies', enemyIndex)}
         ${editHtml}
       </div>`;
     });
@@ -2687,6 +2734,7 @@ window.WORLD_ENGINE_UI = (function() {
           <span class="we-influence-label">直接影响</span>
           <span class="we-influence-text">${u(item.impact)}</span>
         </div>
+        ${renderTimeInfo(item, scope, 'influenceChain', infIndex)}
         ${item.fallout ? `<div class="we-influence-step we-influence-fallout">
           <span class="we-influence-label">后续余波</span>
           <span class="we-influence-text">${u(item.fallout)}</span>
@@ -2747,6 +2795,7 @@ window.WORLD_ENGINE_UI = (function() {
         ${u(ri.title)}<br>
         <span style="font-size:11px;color:var(--we-text3);">类型: ${u(getRegionalIncidentTypeLabel(ri.type))} | 范围: ${u(ri.scope||'?')} | 剩余: ${ri.duration||0}轮</span><br>
         <span style="font-size:11px;color:var(--we-text2);">${u(ri.impact||'')}</span>
+        ${renderTimeInfo(ri, scope, 'regionalIncident')}
         ${editHtml}
       </div>`;
     }
@@ -2815,6 +2864,7 @@ window.WORLD_ENGINE_UI = (function() {
           <div class="we-secret-body">
             <div class="we-secret-title">${u(a.action || '未命名行为')}</div>
             <div class="we-secret-meta">知情者 · ${u(a.witnesses || '无')}</div>
+            ${renderTimeInfo(a, scope, 'blackbox.secretActions', idx)}
           </div>
         </div>`;
       });
@@ -2836,6 +2886,7 @@ window.WORLD_ENGINE_UI = (function() {
           </div>
           <div class="we-secret-body">
             <div class="we-secret-title">${u(a.name || '未命名资产')}<span class="we-secret-status" style="color:${stColor};border-color:${stColor};">${u(status)}</span></div>
+            ${renderTimeInfo(a, scope, 'blackbox.secretAssets', idx)}
             <div class="we-secret-expo">
               <div class="we-secret-expo-track"><div class="we-secret-expo-fill" style="width:${expo}%;"></div></div>
               <span class="we-secret-expo-num">暴露 ${expo}%</span>
@@ -2898,9 +2949,11 @@ window.WORLD_ENGINE_UI = (function() {
         } else if (c.type === 'wind_new') {
           lines.push(`[新增Lv${c.level}风声] ${u(c.topic)} - ${u(c.content||'')}`);
         }
+        const timing = window.WORLD_ENGINE_TIME?.brief(c);
+        if (timing) lines.push('时间：' + h(timing));
       }
       return `<div class="we-ledger-item">
-        <span class="we-ledger-round">第${entry.round}轮</span>
+        <span class="we-ledger-round">第${entry.round}轮 · ${h(window.WORLD_ENGINE_TIME?.format(entry.storyTime) || '时间未知')}</span>
         <div class="we-ledger-changes">${lines.map(l => `<div class="we-ledger-line">${l}</div>`).join('')}</div>
       </div>`;
     });
@@ -2961,6 +3014,8 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function updateMemoryPanelHeader() {
+    const storyTimeEl = document.getElementById('we-header-story-time');
+    if (storyTimeEl) storyTimeEl.hidden = true;
     const state = window.MEMORY_ENGINE_DATA?.loadState?.() || {};
     const eventMemory = state.event_memory || {};
     const memoryLayer = Number.isFinite(Number(state.chatLayer)) ? Math.max(0, Number(state.chatLayer)) : 0;
@@ -4047,7 +4102,35 @@ window.WORLD_ENGINE_UI = (function() {
     };
   }
 
+  function bindTimeEditors() {
+    document.querySelectorAll('.we-time-save').forEach(button => {
+      button.onclick = () => {
+        if (evolution?.isRunning?.()) { showToast('请等待当前推演完成后修改时间', true); return; }
+        const form = button.closest('.we-time-annotations');
+        const scope = form.dataset.timeScope, path = form.dataset.timePath;
+        const value = loadScopedState(scope), api = window.WORLD_ENGINE_TIME;
+        if (!value || !api) return;
+        if (path === 'storyTime') api.setManualClock(value, form.querySelector('input').value, value.processedThrough ?? value.chatLayer ?? core.getChatLayer());
+        else {
+          if (!Object.prototype.hasOwnProperty.call(api.COLLECTIONS, path) && !Object.prototype.hasOwnProperty.call(api.SINGLETONS, path)) return;
+          let item = path.split('.').reduce((obj, key) => obj?.[key], value);
+          if (form.dataset.timeIndex !== undefined) item = item?.[Number(form.dataset.timeIndex)];
+          if (!item || typeof item !== 'object') return;
+          const values = {};
+          form.querySelectorAll('[data-time-field]').forEach(input => {
+            const key = input.dataset.timeField;
+            if (api.FIELDS.includes(key) && input.value.trim() !== (item.time?.[key]?.text || '')) values[key] = input.value;
+          });
+          api.setManualItem(item, values, value.processedThrough ?? value.chatLayer ?? core.getChatLayer());
+        }
+        saveScopedState(scope, value);
+        showToast('剧情时间已保存'); refresh();
+      };
+    });
+  }
+
   function bindEvents(state) {
+    bindTimeEditors();
     const themeSelect = document.getElementById('we-theme-select');
     if (themeSelect) themeSelect.onchange = () => setTheme(themeSelect.value);
     const memoryThemeSelect = document.getElementById('we-memory-theme-select');
@@ -6191,7 +6274,7 @@ window.WORLD_ENGINE_UI = (function() {
     // ===== 单击条目卡片显示/隐藏其编辑按钮（移动端无悬停，统一改为点按）=====
     if (!panelBodyElement || !panelBodyElement.contains(e.target)) return;
     // 点在按钮/输入控件/展开的编辑器内：交给各自处理器，不切换
-    if (e.target.closest('button, select, input, textarea, label, a, .we-event-editor, .we-rep-dot, .we-climate-btn, .we-signal-item, .we-list-arrow, .we-nav-row, .we-section-toggle')) return;
+    if (e.target.closest('button, select, input, textarea, label, a, .we-event-editor, .we-time-annotations, .we-rep-dot, .we-climate-btn, .we-signal-item, .we-list-arrow, .we-nav-row, .we-section-toggle')) return;
     var card = findActionCard(e.target);
     var wasActive = card && card.classList.contains('we-card-active');
     // 先收起其它已展开的卡片

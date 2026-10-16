@@ -545,6 +545,17 @@
   user-select: none;
 }
 .we-header-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.we-header-story-time { color: var(--we-text2); font-size: 11px; overflow-wrap: anywhere; }
+.we-time-annotations { margin: 8px 0; color: var(--we-text2); font-size: 11px; overflow-wrap: anywhere; }
+.we-time-annotations > summary { cursor: pointer; line-height: 1.6; }
+.we-time-annotations[open] { padding: 8px; border: 1px solid var(--we-border); border-radius: 6px; background: var(--we-bg); }
+.we-time-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; margin: 8px 0; }
+.we-time-fields label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.we-time-fields input { box-sizing: border-box; width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--we-border); border-radius: 4px; background: var(--we-bg2); color: var(--we-text); font: inherit; }
+.we-time-help { color: var(--we-text3); line-height: 1.5; margin: 6px 0; }
+.we-time-source { font-size: 10px; line-height: 1.4; color: var(--we-text3); }
+.we-signal-item:has(> .we-time-annotations) { flex-wrap: wrap; }
+.we-signal-item > .we-time-annotations { flex-basis: 100%; order: 3; }
 .we-header-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .we-header-round {
   font-family: "Songti SC", "SimSun", "STSong", serif;
