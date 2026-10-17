@@ -22,6 +22,7 @@ window.WORLD_ENGINE_UI = (function() {
   let _memoryRunningLabel = '';
   let _panelFlipping = false;
   let isEvolving = false;
+  let _backfillStatus = null;
   let editingEvent = null;
   let editingFaction = null;
   let editingWind = null;
@@ -1999,6 +2000,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.3.4', date: '2026-10-17', items: ['修复重开面板或切换引擎后，批量更新仍向旧进度节点写入，导致界面停在某个批次的问题。', '每次开始、重试、完成批次时同步当前进度栏和悬浮球；切回世界界面恢复后台更新后的最新批次。', '完成或停止后清理悬浮球旧计数，保留最终提示与可继续的任务；增加完整面板 25 批离线回归。'] },
     { version: '3.3.3', date: '2026-10-17', items: ['修复运行中的请求保留旧 RPM 设置，保存为 0 后仍继续等待的问题；等待中的任务约每秒检查新上限。', '区分全局 RPM 额度等待与供应商限流冷却，显示对应原因；恢复请求时更新旧等待提示。', '记忆引擎升级至 1.2.3，独立应用本引擎最新保存的 RPM；补充运行中修改与真实表单保存回归。'] },
     { version: '3.3.2', date: '2026-10-17', items: ['针对 API 多选时页面卡死或 STATUS_BREAKPOINT 的报告，将原生 details/summary 改为普通按钮控制菜单显隐，移除失焦时自动折叠的处理。', '勾选仅更新已有文本节点，保留选项、焦点与滚动位置；不再重建摘要或重新读取连接库。', '新增完整面板浏览器回归，覆盖世界和记忆界面的连续多选、键盘、外部点击及实际保存；记忆引擎升级至 1.2.2。'] },
     { version: '3.3.1', date: '2026-10-17', items: ['负载均衡改为分组下拉多选，默认收起，仅显示已选连接摘要；关闭功能时隐藏选择区。', 'RPM 仅保留本引擎的全局上限，移除单连接设置与旧限额的运行逻辑，继续支持 429 自动冷却。', '记忆引擎同步升级至 1.2.1，使用相同的下拉多选与全局 RPM 设置。'] },
@@ -6225,10 +6227,8 @@ window.WORLD_ENGINE_UI = (function() {
 
       startBtn.onclick = () => runBackfill();
       const resumeBtn = document.getElementById('we-backfill-resume');
-      const job = evolution?.getBackfillJob?.();
-      if (resumeBtn) { resumeBtn.disabled = !job || job.status === 'done'; resumeBtn.onclick = () => runBackfill({ mode: 'resume' }); }
-      const status = document.getElementById('we-backfill-status');
-      if (status && job) status.textContent = `上次任务：${job.completedBatches}/${job.totalBatches} 批，已处理到第 ${Math.max(0, job.nextLayer - 1)} 楼${job.status === 'done' ? '（完成）' : '，可继续'}`;
+      if (resumeBtn) resumeBtn.onclick = () => runBackfill({ mode: 'resume' });
+      renderBackfillStatus();
       if (stopBtn) stopBtn.onclick = () => {
         if (evolution && evolution.abort) { evolution.abort(); showToast('已发送停止信号'); }
       };
@@ -6571,14 +6571,28 @@ window.WORLD_ENGINE_UI = (function() {
     } catch (error) { showToast(`记忆重新推演失败：${error?.message || error}`, true); }
   }
 
-  // 批量「重填世界推演」：清空当前世界状态，从第 1 个 AI 楼层分批推到指定楼层。
+  // 进度保存在任务上，界面重建后重新绑定当前节点；不保留旧 DOM 引用。
+  function renderBackfillStatus() {
+    const status = document.getElementById('we-backfill-status');
+    const job = evolution?.getBackfillJob?.();
+    const current = _backfillStatus?.chatId === core.getChatId()
+      && (_backfillStatus.running || ['id', 'nextLayer', 'status'].every(key => _backfillStatus.job?.[key] === job?.[key]))
+      ? _backfillStatus : null;
+    if (status) status.textContent = current?.text || (job
+      ? `上次任务：${job.completedBatches}/${job.totalBatches} 批，已处理到第 ${Math.max(0, job.nextLayer - 1)} 楼${job.status === 'done' ? '（完成）' : '，可继续'}` : '');
+    const busy = isEvolving || Boolean(evolution?.isRunning?.());
+    const start = document.getElementById('we-backfill-start');
+    const resume = document.getElementById('we-backfill-resume');
+    if (start) start.disabled = busy;
+    if (resume) resume.disabled = busy || !job || job.status === 'done';
+  }
+
+  // 批量更新世界：继续补齐、按范围更新或从头重建。
   async function runBackfill(options = {}) {
     if (isEvolving || evolution?.isRunning?.()) { showToast('已有推演进行中，请稍候'); return; }
     const settings = window.WORLD_ENGINE_API.getSettings(true);
     if (settings.engineEnabled === false) { showToast('世界引擎已关闭', true); return; }
     const mode = options.mode || settings.backfillMode || 'continue';
-    const statusEl = document.getElementById('we-backfill-status');
-    const status = text => { if (statusEl) statusEl.textContent = text; };
     if ((mode === 'rebuild' || mode === 'range') && !confirm(mode === 'rebuild'
       ? '将备份当前世界，然后清空并从头重建。确定开始？'
       : '将恢复起始楼层之前的世界，并重算所选范围；起点之后的原世界历史将被替换。确定开始？')) return;
@@ -6586,16 +6600,26 @@ window.WORLD_ENGINE_UI = (function() {
       try { window.WORLD_ENGINE_CHATCACHE?.createSnapshot?.('范围更新前备份'); }
       catch (e) { showToast('备份失败：' + e.message, true); return; }
     }
+    const task = { chatId: core.getChatId(), text: '', ballText: '', running: true };
+    _backfillStatus = task;
+    const status = (text, ballText = text, isError = false) => {
+      task.text = text; task.ballText = ballText;
+      task.job = evolution?.getBackfillJob?.();
+      renderBackfillStatus();
+      if (task.chatId === core.getChatId() && getEngineFace().id === 'world') {
+        window.__WE_SetExternalStatus?.(ballText, isError);
+      }
+    };
     isEvolving = true; setEvolvingUI(true, 'state');
-    status('正在准备更新…');
+    status('正在准备更新…', '回填中：正在准备更新…');
     try {
       const result = await evolution.backfillEvolve({
         mode, batchSize: settings.backfillBatchSize, retries: settings.backfillRetries,
         startLayer: settings.backfillStartLayer, endLayer: settings.backfillEndLayer, layerCount: settings.backfillLayerCount,
         onProgress: p => {
-          if (p.phase === 'batch-start') status('第 ' + p.batch + '/' + p.totalBatches + ' 批：第 ' + p.layerFrom + '—' + p.layerTo + ' 楼更新中…');
-          if (p.phase === 'retry') status('第 ' + p.batch + ' 批失败，正在重试 ' + p.attempt + '…');
-          if (p.phase === 'batch-done') { status('已完成 ' + p.batch + '/' + p.totalBatches + ' 批，处理到第 ' + p.layerTo + ' 楼'); refresh(true); }
+          if (p.phase === 'batch-start') status('第 ' + p.batch + '/' + p.totalBatches + ' 批：第 ' + p.layerFrom + '—' + p.layerTo + ' 楼更新中…', `回填中 ${p.batch}/${p.totalBatches} 批`);
+          if (p.phase === 'retry') status('第 ' + p.batch + '/' + p.totalBatches + ' 批失败，正在重试 ' + p.attempt + '…', `回填中 ${p.batch}/${p.totalBatches} 批，重试 ${p.attempt}`);
+          if (p.phase === 'batch-done') { status('已完成 ' + p.batch + '/' + p.totalBatches + ' 批，处理到第 ' + p.layerTo + ' 楼', `回填中 ${p.batch}/${p.totalBatches} 批`); refresh(true); }
         }
       });
       const reasons = {
@@ -6610,10 +6634,12 @@ window.WORLD_ENGINE_UI = (function() {
       };
       const text = result.done ? '更新完成，已处理到第 ' + result.processedThrough + ' 楼。'
         : reasons[result.reason] || '更新失败：' + (result.error || evolution.getLastError?.() || '未知错误');
-      status(text); showToast(text, !result.done && !['aborted', 'no-ai-layers'].includes(result.reason));
+      const failed = !result.done && !['aborted', 'no-ai-layers'].includes(result.reason);
+      task.running = false;
+      status(text, text, failed); showToast(text, failed);
       window.WORLD_ENGINE?.applyInjection?.();
-    } catch (e) { status('更新失败：' + e.message); showToast(e.message, true); }
-    finally { isEvolving = false; setEvolvingUI(false); refresh(); }
+    } catch (e) { task.running = false; status('更新失败：' + e.message, '更新失败：' + e.message, true); showToast(e.message, true); }
+    finally { task.running = false; isEvolving = false; setEvolvingUI(false); refresh(); }
   }
 
   // ========== 世界引擎悬浮球 ==========
@@ -6691,6 +6717,17 @@ window.WORLD_ENGINE_UI = (function() {
     ball.title = `${face.label}：单击打开面板`;
     ball.setAttribute('aria-label', ball.title);
     updateBallControls();
+    if (ball.dataset.backfillProgress && (face.id !== 'world' || !_backfillStatus?.running || _backfillStatus.chatId !== core.getChatId())) {
+      ball.classList.remove('we-ball-counting');
+      const count = ball.querySelector('.we-ball-count');
+      const ring = ball.querySelector('.we-ball-ring');
+      if (count) count.textContent = '';
+      if (ring) ring.style.setProperty('--we-ring-pct', '0deg');
+      delete ball.dataset.backfillProgress;
+    }
+    if (face.id === 'world' && _backfillStatus?.running && _backfillStatus.chatId === core.getChatId()) {
+      setBallState(_backfillStatus.ballText);
+    }
   }
 
   function loadBallPos() {
@@ -6839,12 +6876,14 @@ window.WORLD_ENGINE_UI = (function() {
 
     const count = ball.querySelector('.we-ball-count');
     const clearCount = () => {
+      delete ball.dataset.backfillProgress;
       ball.classList.remove('we-ball-counting');
       if (count) count.textContent = '';
       if (ring) ring.style.setProperty('--we-ring-pct', '0deg');
     };
 
     if (/回填中/.test(text)) {
+      ball.dataset.backfillProgress = 'true';
       // 批量回填：地球持续旋转 + 右下角显示「批/总」进度
       ball.classList.add('we-ball-evolving');
       if (badge) badge.textContent = '';
@@ -6863,6 +6902,7 @@ window.WORLD_ENGINE_UI = (function() {
       if (badge) badge.textContent = '';
       clearCount(); // 推演进行中不展示轮次计数，避免残留旧的 N/X
     } else if (isError || /失败|异常/.test(text)) {
+      clearCount();
       ball.classList.add('we-ball-fail');
       if (badge) badge.textContent = '✕';
       _ballStatusTimer = setTimeout(() => clearBallBadge(), 6000);
@@ -6871,6 +6911,8 @@ window.WORLD_ENGINE_UI = (function() {
       if (badge) badge.textContent = '✓';
       clearCount(); // 推演完成 → 计数已归零，清掉进度环与数字
       _ballStatusTimer = setTimeout(() => clearBallBadge(), 4000);
+    } else if (/已停止|已中止|没有待处理/.test(text)) {
+      clearCount();
     }
 
     // 解析「第 N/X 轮」→ 进度环 + 数字（仅未到推演的提示态才显示）
