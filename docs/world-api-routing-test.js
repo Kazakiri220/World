@@ -106,6 +106,46 @@ async function main() {
   await limit.timer.advance(59999); assert.equal(limit.requests.length, 1);
   await limit.timer.advance(1); assert.equal(await waiting, 'A');
   assert.equal(limit.requests[1].at, 60000, '限流等待不能消耗单次请求超时');
+
+  // 复现：原请求还需等待 27 秒时，将已保存的 RPM 从 1 改成 0。
+  const liveWorld = harness();
+  liveWorld.values.set('world_engine_settings', JSON.stringify({ ...liveWorld.single, apiRpmLimit: 1 }));
+  await liveWorld.api.callApi('测试推演');
+  await liveWorld.timer.advance(33000);
+  const liveWorldWaiting = liveWorld.api.callApi('测试推演'); await flush();
+  assert.match(liveWorld.api.getRoutingStatus('world').message, /27 秒/);
+  liveWorld.values.set('world_engine_settings', JSON.stringify({ ...liveWorld.single, apiRpmLimit: 0 }));
+  liveWorld.api.getSettings(true); // 与实际表单保存后的刷新一致，旧请求仍持有旧对象。
+  await liveWorld.timer.advance(1000);
+  assert.equal(liveWorld.requests.length, 2, '保存 RPM=0 必须解除正在进行的旧额度等待');
+  assert.equal(await liveWorldWaiting, 'A');
+  assert.equal(liveWorld.requests[1].at, 34000);
+  assert.ok(!liveWorld.statuses.at(-1).includes('等待'), '恢复请求后不能继续显示旧等待横幅');
+  assert.equal(liveWorld.timer.pending(), 0);
+
+  const liveMemory = harness();
+  const memorySnapshot = { ...liveMemory.single, apiScope: 'memory', apiRpmLimit: 1 };
+  liveMemory.values.set('memory_engine_settings', JSON.stringify(memorySnapshot));
+  await liveMemory.call(memorySnapshot);
+  const liveMemoryWaiting = liveMemory.call(memorySnapshot); await flush();
+  liveMemory.values.set('world_engine_settings', JSON.stringify({ apiRpmLimit: 0 }));
+  await liveMemory.timer.advance(1000);
+  assert.equal(liveMemory.requests.length, 1, '世界的 RPM 修改不能解除记忆的额度等待');
+  liveMemory.values.set('memory_engine_settings', JSON.stringify({ ...memorySnapshot, apiRpmLimit: 0 }));
+  await liveMemory.timer.advance(1000);
+  assert.equal(liveMemory.requests.length, 2, '记忆请求也必须读取最新保存的 RPM');
+  assert.equal(await liveMemoryWaiting, 'A');
+  await liveMemory.call(memorySnapshot);
+  assert.equal(liveMemory.requests.length, 3, '批量任务的旧设置快照不能重新启用旧限额');
+
+  const raised = harness();
+  raised.values.set('world_engine_settings', JSON.stringify({ ...raised.settings, apiRpmLimit: 1 }));
+  await raised.api.callApi('测试推演');
+  const raisedWaiting = Promise.all([raised.api.callApi('测试推演'), raised.api.callApi('测试推演')]);
+  await flush(); assert.equal(raised.requests.length, 1);
+  raised.values.set('world_engine_settings', JSON.stringify({ ...raised.settings, apiRpmLimit: 3 }));
+  await raised.timer.advance(1000); await raisedWaiting;
+  assert.deepEqual(raised.requests.map(row => row.kind), ['A', 'B', 'A'], '提高 RPM 后同步放行可用额度，仍保持轮换');
   const poolTotal = harness();
   await poolTotal.call({ ...poolTotal.settings, apiRpmLimit: 1 });
   const poolWaiting = poolTotal.call({ ...poolTotal.settings, apiRpmLimit: 1 });
@@ -155,6 +195,22 @@ async function main() {
   assert.equal(await errors.call(), '恢复');
   assert.equal(errors.api.getApiErrors('world').length, 1, '切换成功仍保留此前错误');
   errors.api.clearApiErrors('world'); assert.equal(errors.api.getApiErrors().length, 0);
+
+  const cooldown = harness();
+  cooldown.onFetch = async () => response(payload, 429, { 'retry-after': '30' }, true);
+  const cooldownSettings = { ...cooldown.single, apiRpmLimit: 0 };
+  cooldown.values.set('world_engine_settings', JSON.stringify(cooldownSettings));
+  await assert.rejects(cooldown.call(cooldownSettings), /quota/);
+  await cooldown.timer.advance(3000);
+  cooldown.onFetch = async () => response('冷却后恢复');
+  const cooldownWaiting = cooldown.call(cooldownSettings); await flush();
+  const cooling = cooldown.api.getRoutingStatus('world');
+  assert.equal(cooling.waitReason, 'cooldown'); assert.equal(cooling.connection, '自定义 A');
+  assert.match(cooling.message, /供应商限流冷却中，约 27 秒/);
+  assert.ok(!cooling.message.includes('RPM 额度'), 'RPM=0 的供应商冷却不得误报为插件额度等待');
+  await cooldown.timer.advance(26999); assert.equal(cooldown.requests.length, 1);
+  await cooldown.timer.advance(1); assert.equal(await cooldownWaiting, '冷却后恢复');
+  assert.equal(cooldown.requests[1].at, 30000, '取消插件主动限额不能绕过供应商 Retry-After');
 
   const allFailed = harness();
   allFailed.onFetch = async () => response('<h1>上游故障</h1>', 503, {}, true);
@@ -234,7 +290,7 @@ async function main() {
   assert.equal(world.core.loadState().worldDigest, digest);
   assert.equal(realEvolution.getBackfillJob().nextLayer, 5);
   assert.equal(worldClock.pending(), 0);
-  console.log('✓ API 轮换：混合连接、并发公平、超时与迟到丢弃、全局 RPM、旧限额失效、取消、429 冷却、完整脱敏报错及有限故障转移通过');
+  console.log('✓ API 轮换：混合连接、并发公平、超时与迟到丢弃、全局 RPM 即时更新、旧限额失效、取消、429 冷却区分、完整脱敏报错及有限故障转移通过');
 }
 const watchdog = setTimeout(() => { console.error('API 调度测试未能完成'); process.exitCode = 1; }, 5000);
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));

@@ -1441,6 +1441,12 @@ window.WORLD_ENGINE_UI = (function() {
         </div>
       </div>
       <div class="we-section" style="margin-top:10px;">
+        <div class="we-section-title">v1.2.3 · RPM 修改应用于等待中的任务</div>
+        <ul class="we-changelog-items">
+          <li>保存 RPM 后，正在等待额度的任务也会使用新上限；供应商限流冷却单独显示原因。</li>
+        </ul>
+      </div>
+      <div class="we-section" style="margin-top:10px;">
         <div class="we-section-title">v1.2.2 · API 多选交互调整</div>
         <ul class="we-changelog-items">
           <li>针对连续选择 API 时页面崩溃的报告，更换下拉展开控件；勾选时保留 DOM、焦点和滚动位置，不重建摘要。</li>
@@ -1993,6 +1999,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.3.3', date: '2026-10-17', items: ['修复运行中的请求保留旧 RPM 设置，保存为 0 后仍继续等待的问题；等待中的任务约每秒检查新上限。', '区分全局 RPM 额度等待与供应商限流冷却，显示对应原因；恢复请求时更新旧等待提示。', '记忆引擎升级至 1.2.3，独立应用本引擎最新保存的 RPM；补充运行中修改与真实表单保存回归。'] },
     { version: '3.3.2', date: '2026-10-17', items: ['针对 API 多选时页面卡死或 STATUS_BREAKPOINT 的报告，将原生 details/summary 改为普通按钮控制菜单显隐，移除失焦时自动折叠的处理。', '勾选仅更新已有文本节点，保留选项、焦点与滚动位置；不再重建摘要或重新读取连接库。', '新增完整面板浏览器回归，覆盖世界和记忆界面的连续多选、键盘、外部点击及实际保存；记忆引擎升级至 1.2.2。'] },
     { version: '3.3.1', date: '2026-10-17', items: ['负载均衡改为分组下拉多选，默认收起，仅显示已选连接摘要；关闭功能时隐藏选择区。', 'RPM 仅保留本引擎的全局上限，移除单连接设置与旧限额的运行逻辑，继续支持 429 自动冷却。', '记忆引擎同步升级至 1.2.1，使用相同的下拉多选与全局 RPM 设置。'] },
     { version: '3.3.0', date: '2026-10-17', items: ['新增多 API 负载均衡，可混选已保存连接与酒馆配置，按顺序轮换并在超时或报错后切换；迟到结果丢弃。', '新增引擎总 RPM 与单连接 RPM，默认不限；重试计数、额度等待、取消和 429 冷却统一处理。', '新增 API 报错详情，展示连接、HTTP 状态、供应商返回正文及酒馆错误原因；已知密钥脱敏，成功切换后仍可查阅。', '记忆引擎升级至 1.2.0，独立选择连接池与总 RPM；同一连接的额度由世界与记忆共同遵守。'] },
@@ -3585,7 +3592,7 @@ window.WORLD_ENGINE_UI = (function() {
     </div>
     <div class="we-input-group"><label for="we-api-rpm">全局 RPM</label>
       <input type="number" id="we-api-rpm" min="0" step="1" value="${Math.max(0, parseInt(settings.apiRpmLimit) || 0)}">
-      <div class="we-hint">本引擎所有 API 合计每分钟最多请求数，0 表示不限。重试与切换也计数，达到上限后自动等待。</div>
+      <div class="we-hint">本引擎所有 API 合计每分钟最多请求数，0 表示不限；重试与切换也计数。保存后会应用于等待中的任务，供应商限流冷却会另行提示。</div>
       <div class="we-hint" id="we-api-routing-status">${h(window.WORLD_ENGINE_API?.getRoutingStatus?.(scope)?.message || '')}</div>
     </div>
     <details class="we-api-errors-panel"><summary>API 报错详情</summary>

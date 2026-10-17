@@ -117,7 +117,26 @@ try {
     assert.deepEqual(stored.apiPool, selected); assert.equal(stored.apiRpmLimit, 7);
     await page.evaluate(() => WORLD_ENGINE_UI.refresh());
     assert.deepEqual(await page.$$eval('.we-api-pool-ref:checked', els => els.map(el => el.dataset.apiRef)), selected);
-    console.log('✓ ' + scope + ': 完整面板连续多选、稳定 DOM/焦点/滚动、键盘、外部点击及实际保存通过');
+    // 通过真正的保存按钮，把一个仍在等待的请求从 RPM=1 切换到 RPM=0。
+    const saveSelector = scope === 'memory' ? '#we-save-memory-settings' : '#we-save-settings';
+    await page.$eval('#we-api-rpm', el => { el.value = '1'; }); await page.click(saveSelector);
+    await page.evaluate(async scope => {
+      const settings = scope === 'memory' ? MEMORY_ENGINE_SETTINGS.getSettings(true) : WORLD_ENGINE_API.getSettings(true);
+      const snapshot = { ...settings, apiSource: 'custom', apiPoolEnabled: false,
+        apiUrl: 'https://offline.test', apiKey: 'fake-key', apiTimeoutMs: 1000 };
+      window.fetch = async () => ({ ok: true, status: 200,
+        text: async () => JSON.stringify({ choices: [{ message: { content: 'offline-ok' } }] }) });
+      await WORLD_ENGINE_API.callApi('测试', 16, 0, null, snapshot);
+      fixture.rpmOutcome = 'pending';
+      WORLD_ENGINE_API.callApi('测试', 16, 0, null, snapshot)
+        .then(value => { fixture.rpmOutcome = value; }).catch(error => { fixture.rpmOutcome = error.message; });
+    }, scope);
+    await page.waitForFunction(scope => WORLD_ENGINE_API.getRoutingStatus(scope)?.state === 'waiting', {}, scope);
+    await page.$eval('#we-api-rpm', el => { el.value = '0'; }); await page.click(saveSelector);
+    await page.waitForFunction(() => fixture.rpmOutcome !== 'pending', { timeout: 4000 });
+    assert.equal(await page.evaluate(() => fixture.rpmOutcome), 'offline-ok', '保存 RPM=0 后原请求必须恢复');
+    assert.equal(await page.evaluate(scope => JSON.parse(fixture.values.get(scope + '_engine_settings')).apiRpmLimit, scope), 0);
+    console.log('✓ ' + scope + ': 连续多选、稳定 DOM、键盘及实际保存；原请求在保存 RPM=0 后恢复通过');
   }
   await exercise('world');
   await page.click('.we-engine-face-toggle');

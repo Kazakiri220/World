@@ -252,12 +252,13 @@ window.WORLD_ENGINE_API = (function() {
   }
   function abortError() { return Object.assign(new Error('已中止'), { name: 'AbortError' }); }
   function checkAbort(signal) { if (signal?.aborted) throw abortError(); }
-  function statusUpdate(settings, message, state, candidate, waitingUntil) {
+  function statusUpdate(settings, message, state, candidate, waitingUntil, waitReason) {
     const scope = scopeOf(settings);
-    routingStatus.set(scope, { state, connection: candidate?.name || '', waitingUntil: waitingUntil || null, message });
+    const previous = routingStatus.get(scope);
+    routingStatus.set(scope, { state, connection: candidate?.name || '', waitingUntil: waitingUntil || null, waitReason: waitReason || null, message });
     try {
       window.WORLD_ENGINE_UI?.refreshApiErrors?.();
-      if (state === 'waiting' || state === 'switching') window.__WE_SetExternalStatus?.(`${scope === 'memory' ? '记忆' : '世界'} API：${message}`);
+      if (state === 'waiting' || state === 'switching' || previous?.state === 'waiting') window.__WE_SetExternalStatus?.(`${scope === 'memory' ? '记忆' : '世界'} API：${message}`);
     } catch (_) {}
   }
   function sleepAbortable(ms, signal) {
@@ -277,6 +278,12 @@ window.WORLD_ENGINE_API = (function() {
   function waitFor(key, limit, now) {
     const times = bucket(key, now);
     return Math.max(0, limit > 0 && times.length >= limit ? times[times.length - limit] + 60000 - now : 0);
+  }
+  function currentRpm(settings) {
+    // 全局 RPM 以本引擎最新保存值为准，避免运行中的请求一直使用旧配置快照。
+    // 未保存引擎设置的独立调用仍使用传入值；记忆请求只读取记忆设置。
+    const saved = readGlobal(scopeOf(settings) + '_engine_settings', null);
+    return rpm(saved && Object.prototype.hasOwnProperty.call(saved, 'apiRpmLimit') ? saved.apiRpmLimit : settings.apiRpmLimit);
   }
   function quotaKey(settings) {
     // 自定义连接的同地址、同密钥别名共用 429 冷却；此身份只留在内存，不持久化或输出。
@@ -315,20 +322,27 @@ window.WORLD_ENGINE_API = (function() {
       const ordered = candidates.map((_, offset) => candidates[(start + offset) % candidates.length]).filter(row => !attempted.has(row.ref));
       if (!ordered.length) return null;
       const now = Date.now();
-      const globalWait = waitFor(scopeKey, rpm(settings.apiRpmLimit), now);
-      let shortest = Infinity;
+      const globalWait = waitFor(scopeKey, currentRpm(settings), now);
+      let shortest = Infinity, waitingCandidate = null, cooldownWait = 0;
       for (const candidate of ordered) {
         if (candidate.error) return pick(candidate);
-        const wait = Math.max(globalWait, (blockedUntil.get(quotaKey(candidate.settings)) || 0) - now);
+        const cooldown = Math.max(0, (blockedUntil.get(quotaKey(candidate.settings)) || 0) - now);
+        const wait = Math.max(globalWait, cooldown);
         if (!wait) {
           // 检查与占位同步执行，多个并发调用也不能取得同一个 RPM 余量。
           bucket(scopeKey, now).push(now);
           return pick(candidate);
         }
-        shortest = Math.min(shortest, wait);
+        if (wait < shortest) { shortest = wait; waitingCandidate = candidate; cooldownWait = cooldown; }
       }
-      statusUpdate(settings, `等待 RPM 额度，约 ${Math.ceil(shortest / 1000)} 秒`, 'waiting', null, now + shortest);
-      await sleepAbortable(shortest, signal);
+      const seconds = Math.ceil(shortest / 1000);
+      const waitReason = cooldownWait > 0 && cooldownWait >= globalWait ? 'cooldown' : 'rpm';
+      const message = waitReason === 'cooldown'
+        ? `${waitingCandidate.name}：供应商限流冷却中，约 ${seconds} 秒`
+        : `等待全局 RPM 额度，约 ${seconds} 秒`;
+      statusUpdate(settings, message, 'waiting', waitingCandidate, now + shortest, waitReason);
+      // 等待期间每秒重读最新 RPM，保存为 0 或提高额度后无需停止并重启任务。
+      await sleepAbortable(Math.min(shortest, 1000), signal);
     }
   }
   // 即使某个服务没有正确响应 AbortSignal，也会停止等待；迟到结果由 Promise.race 消费并丢弃。
