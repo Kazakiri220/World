@@ -1025,7 +1025,7 @@ ${JSON.stringify(sample || [], null, 2)}
           throw error;
         }
         console.warn(`[世界引擎] API fault，自动重试 ${attempt + 1}/${maxRetries}:`, error && error.message ? error.message : error);
-        if (window.__WE_SetExternalStatus) window.__WE_SetExternalStatus(`API fault，自动重试 ${attempt + 1}/${maxRetries}`);
+        if (window.__WE_SetExternalStatus) window.__WE_SetExternalStatus(`API fault：${error?.message || error}；自动重试 ${attempt + 1}/${maxRetries}`);
       }
     }
     console.log('[世界引擎] API JSON 解析成功，世界摘要:', update.world_digest || '[未返回]');

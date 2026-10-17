@@ -554,6 +554,15 @@
 .we-time-fields input { box-sizing: border-box; width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--we-border); border-radius: 4px; background: var(--we-bg2); color: var(--we-text); font: inherit; }
 .we-time-help { color: var(--we-text3); line-height: 1.5; margin: 6px 0; }
 .we-time-source { font-size: 10px; line-height: 1.4; color: var(--we-text3); }
+.we-api-pool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--we-border); }
+.we-api-pool-row > label:first-child { display: flex; flex: 1; gap: 7px; align-items: center; min-width: 130px; overflow-wrap: anywhere; }
+.we-api-pool-row small { display: block; color: var(--we-text3); font-size: 10px; }
+.we-api-rpm-label { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+.we-api-rpm-label input { width: 70px; }
+.we-api-errors-panel { margin: 12px 0; font-size: 12px; }
+.we-api-errors-panel summary { cursor: pointer; overflow-wrap: anywhere; }
+.we-api-error { margin-top: 8px; padding: 8px; border: 1px solid var(--we-border); border-radius: 6px; }
+.we-api-error-body { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: var(--we-bg2); color: var(--we-text); font-size: 11px; }
 .we-signal-item:has(> .we-time-annotations) { flex-wrap: wrap; }
 .we-signal-item > .we-time-annotations { flex-basis: 100%; order: 3; }
 .we-header-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }

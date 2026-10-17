@@ -1,7 +1,7 @@
 // memory-engine-settings.js — 记忆引擎独立设置（只复用 API/调度等实现，不共享配置值）
 window.MEMORY_ENGINE_SETTINGS = (function() {
   const STORAGE_KEY = 'memory_engine_settings';
-  const VERSION = '1.1.2';
+  const VERSION = '1.2.0';
   const DEFAULTS = Object.freeze({
     apiUrl: '',
     apiKey: '',
@@ -10,6 +10,10 @@ window.MEMORY_ENGINE_SETTINGS = (function() {
     apiSource: 'custom',
     apiProfileId: '',
     tavernProfileId: '',
+    apiScope: 'memory',
+    apiPoolEnabled: false,
+    apiPool: [],
+    apiRpmLimit: 0,
     temperature: 0.2,
     maxTokens: 65000,
     apiTimeoutMs: 120000,
@@ -57,6 +61,7 @@ window.MEMORY_ENGINE_SETTINGS = (function() {
     const savedMaxTokens = Math.max(1, parseInt(merged.maxTokens) || 65000);
     return {
       ...merged,
+      apiScope: 'memory',
       // 旧版部分预设把输出上限保存成 4096；升级后自动迁移，避免继续截断 API 返回。
       maxTokens: savedMaxTokens === 4096 ? 65000 : savedMaxTokens,
       evolveEveryX: 1,

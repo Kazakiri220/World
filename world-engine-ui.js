@@ -1170,7 +1170,7 @@ window.WORLD_ENGINE_UI = (function() {
     const summaryBackfillBigEveryX = Math.max(1, parseInt(settings.summaryBackfillBigEveryX) || 5);
     const apiTemperature = Number.isFinite(Number(settings.temperature)) ? Math.max(0, Number(settings.temperature)) : 0.2;
     const apiMaxTokens = Math.max(1, parseInt(settings.maxTokens) || 65000);
-    const apiTimeoutSec = Math.max(0, Math.round((Number(settings.apiTimeoutMs) || 120000) / 1000));
+    const apiTimeoutSec = Math.max(0, Math.round((Number.isFinite(Number(settings.apiTimeoutMs)) ? Number(settings.apiTimeoutMs) : 120000) / 1000));
 
     const apiBody = `
       <div class="we-input-group">
@@ -1217,7 +1217,7 @@ window.WORLD_ENGINE_UI = (function() {
         <label>请求超时（秒）</label>
         <input type="number" id="we-api-timeout-sec" min="0" step="1" value="${apiTimeoutSec}" style="width:100%;">
         <div style="font-size:11px;color:var(--we-text3);margin-top:3px;">此处只配置记忆引擎；请求实现与世界引擎共用，但配置值互不覆盖。</div>
-      </div>`;
+      </div>${renderApiRoutingSettings(settings)}`;
 
     const modeBody = `
       <div class="we-input-group">
@@ -1435,10 +1435,18 @@ window.WORLD_ENGINE_UI = (function() {
     const memoryAboutBody = `
       <div class="we-about-current"><span class="we-changelog-cur">记忆引擎 v${h(memoryVersion)}</span></div>
       <div class="we-section" style="margin-top:10px;">
-        <div class="we-section-title">记忆引擎 1.1</div>
+        <div class="we-section-title">记忆引擎 ${h(memoryVersion)}</div>
         <div style="font-size:12px;color:var(--we-text2);line-height:1.7;">
           面向长篇对话的独立记忆系统。人物记忆保留知情人边界，实体记忆维护组织、物件、能力与地点的当前状态和历史；纪要按新增轮次记录阶段事件，总述再将多条纪要压缩为长期脉络。
         </div>
+      </div>
+      <div class="we-section" style="margin-top:10px;">
+        <div class="we-section-title">v1.2.0 · API 轮换与限流</div>
+        <ul class="we-changelog-items">
+          <li>可多选已保存连接及酒馆配置，成功、超时或报错后轮换；记忆与世界分别保存选择。</li>
+          <li>支持引擎总 RPM 和连接 RPM，默认不限；同一连接在两引擎之间共用计数。</li>
+          <li>新增 API 报错详情，保留供应商错误正文和酒馆请求服务提供的原因。</li>
+        </ul>
       </div>
       <div class="we-section" style="margin-top:10px;">
         <div class="we-section-title">v1.1.2 · 修复总述与纪要重复注入</div>
@@ -1979,6 +1987,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.3.0', date: '2026-10-17', items: ['新增多 API 负载均衡，可混选已保存连接与酒馆配置，按顺序轮换并在超时或报错后切换；迟到结果丢弃。', '新增引擎总 RPM 与单连接 RPM，默认不限；重试计数、额度等待、取消和 429 冷却统一处理。', '新增 API 报错详情，展示连接、HTTP 状态、供应商返回正文及酒馆错误原因；已知密钥脱敏，成功切换后仍可查阅。', '记忆引擎升级至 1.2.0，独立选择连接池与总 RPM；同一连接的额度由世界与记忆共同遵守。'] },
     { version: '3.2.0', date: '2026-10-16', items: ['世界状态和事件、风声等信息增加剧情时间标注，分别记录首次记录、最近变化、实际发生及预计/截止时间。', '与世界推演共用请求，从本次正文提取时间并核验原文依据；未知、沿用及手动修正分别保存。', '面板支持查看和修改时间，推演上下文、正文注入和重大事件账本同步携带时间。', '回填按目标历史正文提取，楼层回退与分支同步恢复；旧存档缺失时间保持未知，现有按轮机制继续保留。'] },
     { version: '3.1.0', date: '2026-10-16', items: ['新增 API 连接库及酒馆连接配置调用，世界与记忆引擎独立选择连接。', '支持按聊天楼层继续补齐、指定范围重算和从头重建；失败或刷新后可断点续传。', '新增随消息保存的世界历史及回复版本快照，支持删除回退和原生分支/checkpoint继承；手动编辑正文不触发世界更新。', '世界历史默认保留最近200个聊天楼层，可调整或设为不限；定期完整快照与差分记录共同保存。'] },
     { version: '3.0.2', date: '2026-07-19', items: ['放宽事件链的早期创建条件：已有具体迹象的筹划、试探、调查起步或矛盾初现，可以在尚未成熟时进入事件链持续观察。', '放宽风声的传播起点：明确信息主题一旦开始公开发布、被他人听闻或转述、经渠道传递或形成小范围议论，即可创建，不再要求已影响其他持久状态。', '保留事件与风声的归并、去重和合法传播边界，避免放宽准入后产生重复条目或私密信息泄露。'] },
@@ -3500,6 +3509,81 @@ window.WORLD_ENGINE_UI = (function() {
       + '</div>';
   }
 
+  function renderApiPoolRows(settings) {
+    const api = window.WORLD_ENGINE_API;
+    const selected = new Set(Array.isArray(settings.apiPool) ? settings.apiPool : []);
+    const rows = api?.listApiConnections?.() || [];
+    for (const ref of selected) if (!rows.some(row => row.ref === ref)) rows.push({ ref, name: ref + '（不可用）', source: 'missing' });
+    return rows.map(row => `<div class="we-api-pool-row">
+      <label><input type="checkbox" class="we-api-pool-ref" data-api-ref="${h(row.ref)}" ${selected.has(row.ref) ? 'checked' : ''}>
+      <span>${h(row.name)}<small>${row.source === 'tavern' ? '酒馆配置' : row.source === 'custom' ? '已保存连接' : '不可用'}${row.model ? ' · ' + h(row.model) : ''}</small></span></label>
+      <label class="we-api-rpm-label">连接 RPM<input type="number" class="we-api-connection-rpm" data-api-ref="${h(row.ref)}" min="0" step="1" value="${api?.getConnectionRpm?.(row.ref) || 0}" title="0 表示不限；此连接的限制由世界与记忆请求共用"></label>
+    </div>`).join('') || '<div class="we-hint">先保存 API 连接或在酒馆中创建连接配置，即可加入轮换列表。</div>';
+  }
+
+  function renderApiErrors(scope) {
+    const errors = window.WORLD_ENGINE_API?.getApiErrors?.(scope) || [];
+    if (!errors.length) return '<div class="we-hint">暂无 API 报错。</div>';
+    return errors.map(row => `<details class="we-api-error" data-api-error="${h(row.timestamp + '|' + row.ref)}">
+      <summary>${h(new Date(row.timestamp).toLocaleString())} · ${h(row.connection)}${row.status ? ' · HTTP ' + h(row.status) : ''}<br>${h(row.message)}</summary>
+      <pre class="we-api-error-body">${h(row.body || row.message)}</pre>${row.truncated ? '<div class="we-hint">返回内容超过 65536 个字符，此处保留前 65536 个字符。</div>' : ''}
+    </details>`).join('');
+  }
+
+  function refreshApiErrors() {
+    const box = document.getElementById('we-api-errors');
+    if (!box) return;
+    const scope = box.dataset.apiScope || 'world';
+    const markup = renderApiErrors(scope);
+    if (box._apiErrorMarkup !== markup) {
+      const opened = new Set(Array.from(box.querySelectorAll?.('[data-api-error][open]') || []).map(item => item.dataset.apiError));
+      box.innerHTML = markup; box._apiErrorMarkup = markup;
+      for (const item of box.querySelectorAll?.('[data-api-error]') || []) item.open = opened.has(item.dataset.apiError);
+    }
+    const status = document.getElementById('we-api-routing-status');
+    if (status) status.textContent = window.WORLD_ENGINE_API?.getRoutingStatus?.(scope)?.message || '';
+  }
+
+  function renderApiRoutingSettings(settings) {
+    const scope = settings.apiScope === 'memory' ? 'memory' : 'world';
+    return `<div class="we-input-group">
+      <label><input type="checkbox" id="we-api-pool-enabled" ${settings.apiPoolEnabled === true ? 'checked' : ''}> 启用多 API 负载均衡</label>
+      <div class="we-hint">勾选连接并保存设置后，按列表顺序轮换。成功、超时或报错后使用下一条；每次推演顺序请求。上方“请求超时”控制每条连接的等待时长，0 表示不限时。轮换使用已保存的地址、密钥和模型，编辑后需先点“更新连接”。</div>
+      <div id="we-api-pool-rows">${renderApiPoolRows(settings)}</div>
+      <div class="we-hint">每条连接的 RPM 即时保存，世界与记忆共用。同地址、同密钥的自定义连接共用额度；0 表示不限。</div>
+    </div>
+    <div class="we-input-group"><label>本引擎每分钟最多请求数（RPM）</label>
+      <input type="number" id="we-api-rpm" min="0" step="1" value="${Math.max(0, parseInt(settings.apiRpmLimit) || 0)}">
+      <div class="we-hint">0 表示不限。总量与连接各自的上限同时生效；重试及切换请求也计数。额度不足时等待，可停止任务；等待额度不计入请求超时。</div>
+      <div class="we-hint" id="we-api-routing-status">${h(window.WORLD_ENGINE_API?.getRoutingStatus?.(scope)?.message || '')}</div>
+    </div>
+    <details class="we-api-errors-panel"><summary>API 报错详情</summary>
+      <button class="we-btn" id="we-api-errors-clear" data-api-scope="${scope}">清空本引擎报错记录</button>
+      <div id="we-api-errors" data-api-scope="${scope}">${renderApiErrors(scope)}</div>
+    </details>`;
+  }
+
+  function readApiRoutingForm() {
+    return {
+      apiScope: _engineFace === 'memory' ? 'memory' : 'world',
+      apiPoolEnabled: document.getElementById('we-api-pool-enabled')?.checked === true,
+      apiPool: Array.from(document.querySelectorAll('.we-api-pool-ref:checked')).map(input => input.dataset.apiRef),
+      apiRpmLimit: Math.max(0, parseInt(document.getElementById('we-api-rpm')?.value) || 0)
+    };
+  }
+
+  function bindApiRoutingControls() {
+    const api = window.WORLD_ENGINE_API;
+    document.querySelectorAll('.we-api-connection-rpm').forEach(input => {
+      input.onchange = () => {
+        input.value = String(Math.max(0, parseInt(input.value) || 0));
+        api.setConnectionRpm(input.dataset.apiRef, input.value);
+      };
+    });
+    const clear = document.getElementById('we-api-errors-clear');
+    if (clear) clear.onclick = () => { api.clearApiErrors(clear.dataset.apiScope); refreshApiErrors(); };
+  }
+
   function renderApiConnectionOptions(settings) {
     const api = window.WORLD_ENGINE_API;
     const selected = settings.apiSource === 'tavern' ? 'tavern:' + settings.tavernProfileId
@@ -3518,6 +3602,7 @@ window.WORLD_ENGINE_UI = (function() {
     const gv = id => document.getElementById(id)?.value || '';
     const choice = gv('we-api-profile');
     return {
+      ...readApiRoutingForm(),
       apiSource: choice.startsWith('tavern:') ? 'tavern' : 'custom',
       apiProfileId: choice.startsWith('custom:') ? choice.slice(7) : '',
       tavernProfileId: choice.startsWith('tavern:') ? choice.slice(7) : '',
@@ -3548,7 +3633,13 @@ window.WORLD_ENGINE_UI = (function() {
       if (hint) hint.textContent = tavern ? '使用所选酒馆连接的地址、模型和密钥；正文连接不变。温度和输出上限使用下方设置。'
         : '连接库可供两个引擎选择；各引擎的选择独立保存，密钥不会进入聊天存档。';
     };
-    const refreshChoices = patch => { select.innerHTML = renderApiConnectionOptions(persist(patch)); updateAvailability(); };
+    const refreshChoices = patch => {
+      const settings = persist(patch);
+      select.innerHTML = renderApiConnectionOptions(settings);
+      const rows = document.getElementById('we-api-pool-rows');
+      if (rows) rows.innerHTML = renderApiPoolRows(settings);
+      bindApiRoutingControls(); updateAvailability();
+    };
     select.onchange = () => {
       if (select.value.startsWith('custom:')) {
         const p = api.listApiProfiles().find(p => p.id === select.value.slice(7));
@@ -3581,12 +3672,15 @@ window.WORLD_ENGINE_UI = (function() {
       const current = _engineFace === 'memory' ? window.MEMORY_ENGINE_SETTINGS.getSettings(true) : api.getSettings(true);
       test.disabled = true; test.textContent = '测试中…';
       try {
-        await api.callApi('请只回复 OK。', 16, 0, null, { ...current, ...readApiConnectionForm(), apiTimeoutMs: Math.max(1, Number(document.getElementById('we-api-timeout-sec')?.value) || 30) * 1000 });
+        const timeoutRaw = Number(document.getElementById('we-api-timeout-sec')?.value);
+        await api.callApi('请只回复 OK。', 16, 0, null, { ...current, ...readApiConnectionForm(), apiPoolEnabled: false,
+          apiTimeoutMs: Number.isFinite(timeoutRaw) ? Math.max(0, timeoutRaw * 1000) : 30000 });
         showToast('连接测试成功');
       } catch (e) { showToast('连接测试失败：' + e.message, true); }
       finally { test.disabled = false; test.textContent = '测试连接'; }
     };
     updateAvailability();
+    bindApiRoutingControls();
   }
 
   function renderSettingsForm() {
@@ -3669,7 +3763,7 @@ window.WORLD_ENGINE_UI = (function() {
         <label>请求超时（秒）</label>
         <input type="number" id="we-api-timeout-sec" min="0" step="1" value="${apiTimeoutSec}" style="width:100%;">
         <div style="font-size:11px;color:var(--we-text3);margin-top:3px;">超过该时间仍未收到完整响应会自动中止并解除「推演中」状态。0 = 不超时。</div>
-      </div>`;
+      </div>${renderApiRoutingSettings(settings)}`;
 
     const evolveBody = `
       <div class="we-input-group">
@@ -6832,7 +6926,7 @@ window.WORLD_ENGINE_UI = (function() {
   return {
     buildPanel, buildInputButton, showPanel, hidePanel, togglePanel, refresh, setStatus,
     setEvolvingUI, setMemoryEvolvingUI, setInjectedScope,
-    registerEngineFace,
+    registerEngineFace, refreshApiErrors,
     listEngineFaces: () => { ensureBuiltinEngineFaces(); return _engineFaceOrder.map(id => ({ ...getEngineFace(id) })); },
     advanceEngineFace
   };

@@ -817,6 +817,7 @@ window.MEMORY_ENGINE = (function() {
       } catch (error) {
         lastDebug.error = String(error?.message || error);
         if (abortController?.signal?.aborted || attempt >= retries) throw error;
+        setExternalStatus(`记忆 API 请求失败：${lastDebug.error}；自动重试 ${attempt + 1}/${retries}`, true);
       }
     }
     throw new Error('记忆 API 请求失败');

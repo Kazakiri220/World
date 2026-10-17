@@ -9,6 +9,10 @@ window.WORLD_ENGINE_API = (function() {
     connectionMode: 'direct',
     apiSource: 'custom',
     tavernProfileId: '',
+    apiScope: 'world',
+    apiPoolEnabled: false,
+    apiPool: Object.freeze([]),
+    apiRpmLimit: 0,
     temperature: 0.7,
     maxTokens: 65000,
     apiTimeoutMs: 120000
@@ -32,6 +36,10 @@ window.WORLD_ENGINE_API = (function() {
       apiSource: 'custom',
       apiProfileId: '',
       tavernProfileId: '',
+      apiScope: 'world',
+      apiPoolEnabled: false,
+      apiPool: [],
+      apiRpmLimit: 0,
       injectIntoPrompt: true,
       injectMaxChars: 5000,
       // 正文注入等级筛选：false=仅注入高等级信息（兼容旧行为），true=事件链与风声不按等级过滤
@@ -118,6 +126,7 @@ window.WORLD_ENGINE_API = (function() {
     if (raw) {
       try {
         cachedSettings = { ...defaults, ...JSON.parse(raw) };
+        cachedSettings.apiScope = 'world';
         if (parseInt(cachedSettings.maxTokens) === 4096) cachedSettings.maxTokens = 65000;
         return cachedSettings;
       } catch(e) {}
@@ -171,6 +180,182 @@ window.WORLD_ENGINE_API = (function() {
       return service?.getSupportedProfiles ? service.getSupportedProfiles() : (ctx.extensionSettings?.connectionManager?.profiles || []);
     } catch (_) { return []; }
   }
+
+  const LIMITS_KEY = 'world_engine_api_rpm_limits';
+  const ERRORS_KEY = 'world_engine_api_errors';
+  const rpmWindows = new Map();
+  const blockedUntil = new Map();
+  const nextConnections = new Map();
+  const routingStatus = new Map();
+  let errorLogCache = null;
+  const rpm = value => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
+  const scopeOf = settings => settings.apiScope === 'memory' ? 'memory' : 'world';
+  function readGlobal(key, fallback) {
+    try { return JSON.parse(window.WORLD_ENGINE_STORE.getItem(key) || 'null') || fallback; } catch (_) { return fallback; }
+  }
+  function listApiConnections() {
+    return [
+      ...listApiProfiles().map(p => ({ ref: 'custom:' + p.id, name: p.name, source: 'custom', model: p.model })),
+      ...getTavernProfiles().map(p => ({ ref: 'tavern:' + p.id, name: p.name, source: 'tavern', model: p.model }))
+    ];
+  }
+  function getConnectionRpm(ref) { return rpm(readGlobal(LIMITS_KEY, {})[ref]); }
+  function setConnectionRpm(ref, value) {
+    if (!/^(custom|tavern):.+/.test(ref)) throw new Error('请选择已保存的连接');
+    window.WORLD_ENGINE_STORE.setItem(LIMITS_KEY, JSON.stringify({ ...readGlobal(LIMITS_KEY, {}), [ref]: rpm(value) }));
+  }
+  function redact(value, settings) {
+    let text = errorText(value);
+    const secrets = [settings?.apiKey, ...listApiProfiles().map(p => p.apiKey)];
+    for (const key of ['world_engine_settings', 'memory_engine_settings']) secrets.push(readGlobal(key, {}).apiKey);
+    for (const secret of new Set(secrets.filter(Boolean).map(String))) text = text.split(secret).join('[已隐藏密钥]');
+    return text.replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[已隐藏密钥]')
+      .replace(/("(?:api[_-]?key|authorization|proxy_password|access_token)"\s*:\s*")[^"]*/gi, '$1[已隐藏密钥]')
+      .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[已隐藏鉴权]@');
+  }
+  function errorText(value) {
+    if (typeof value === 'string') return value;
+    try { return JSON.stringify(value ?? '') ?? String(value); } catch (_) { return String(value); }
+  }
+  function errorInfo(error, settings) {
+    const messages = [], bodies = [], seen = new Set();
+    let status = null, retryAfterMs = null, rateLimited = false;
+    for (let current = error; current && !seen.has(current) && seen.size < 8; current = current.cause) {
+      seen.add(current);
+      const message = typeof current === 'string' ? current : current.message;
+      if (message && !messages.includes(String(message))) messages.push(String(message));
+      status ||= Number(current.status || current.response?.status) || null;
+      rateLimited ||= current.rateLimited === true || status === 429 || /\b429\b|rate.limit|too.many.requests/i.test(String(message || ''));
+      retryAfterMs ??= current.retryAfterMs;
+      const detail = current.responseBody ?? current.responseText ?? current.response?.data;
+      if (detail != null) bodies.push(errorText(detail));
+    }
+    const full = redact(bodies.join('\n\n') || messages.join('\n原因：') || String(error), settings);
+    return { status, retryAfterMs, rateLimited, message: redact(messages.join(' → ') || String(error), settings).slice(0, 2000),
+      body: full.slice(0, 65536), truncated: full.length > 65536 };
+  }
+  function getApiErrors(scope) {
+    if (!errorLogCache) {
+      const saved = readGlobal(ERRORS_KEY, []);
+      errorLogCache = Array.isArray(saved) ? saved : [];
+    }
+    return errorLogCache.filter(row => !scope || row.scope === scope);
+  }
+  function clearApiErrors(scope) {
+    errorLogCache = scope ? getApiErrors().filter(row => row.scope !== scope) : [];
+    try { window.WORLD_ENGINE_STORE.setItem(ERRORS_KEY, JSON.stringify(errorLogCache)); } catch (_) {}
+  }
+  function recordApiError(error, settings, candidate) {
+    const info = errorInfo(error, settings);
+    const row = { ...info, timestamp: Date.now(), scope: scopeOf(settings), connection: redact(candidate.name, settings), ref: candidate.ref };
+    errorLogCache = [row, ...getApiErrors()].slice(0, 20);
+    // 报错记录写满本地存储时仍允许故障转移，当前页面保留可查看的内存副本。
+    try { window.WORLD_ENGINE_STORE.setItem(ERRORS_KEY, JSON.stringify(errorLogCache)); } catch (_) {}
+    try { window.WORLD_ENGINE_UI?.refreshApiErrors?.(); } catch (_) {}
+    const wrapped = new Error(info.message);
+    Object.assign(wrapped, info, { name: error?.name || 'Error', connection: row.connection });
+    return wrapped;
+  }
+  function abortError() { return Object.assign(new Error('已中止'), { name: 'AbortError' }); }
+  function checkAbort(signal) { if (signal?.aborted) throw abortError(); }
+  function statusUpdate(settings, message, state, candidate, waitingUntil) {
+    const scope = scopeOf(settings);
+    routingStatus.set(scope, { state, connection: candidate?.name || '', waitingUntil: waitingUntil || null, message });
+    try {
+      window.WORLD_ENGINE_UI?.refreshApiErrors?.();
+      if (state === 'waiting' || state === 'switching') window.__WE_SetExternalStatus?.(`${scope === 'memory' ? '记忆' : '世界'} API：${message}`);
+    } catch (_) {}
+  }
+  function sleepAbortable(ms, signal) {
+    checkAbort(signal);
+    return new Promise((resolve, reject) => {
+      const finish = () => { signal?.removeEventListener('abort', stopped); resolve(); };
+      const timer = setTimeout(finish, Math.min(60000, Math.max(1, ms)));
+      const stopped = () => { clearTimeout(timer); signal.removeEventListener('abort', stopped); reject(abortError()); };
+      signal?.addEventListener('abort', stopped, { once: true });
+    });
+  }
+  function bucket(key, now) {
+    const timestamps = (rpmWindows.get(key) || []).filter(time => time > now - 60000);
+    rpmWindows.set(key, timestamps);
+    return timestamps;
+  }
+  function waitFor(key, limit, now) {
+    const times = bucket(key, now);
+    return Math.max(0, (blockedUntil.get(key) || 0) - now, limit > 0 && times.length >= limit ? times[times.length - limit] + 60000 - now : 0);
+  }
+  function quotaKey(settings) {
+    // 自定义连接的同地址、同密钥别名共用计数；此身份只留在内存，不持久化或输出。
+    return settings.apiSource === 'tavern' ? 'tavern:' + settings.tavernProfileId
+      : 'custom:' + normalizeUrl(settings.apiUrl || '') + '\n' + (settings.apiKey || '');
+  }
+  function connectionLimit(candidate) {
+    const settings = candidate.settings;
+    if (settings.apiSource === 'tavern') return getConnectionRpm(candidate.ref);
+    const same = listApiProfiles().filter(p => normalizeUrl(p.apiUrl || '') === normalizeUrl(settings.apiUrl || '') && p.apiKey === settings.apiKey);
+    const limits = [getConnectionRpm(candidate.ref), ...same.map(p => getConnectionRpm('custom:' + p.id))].filter(value => value > 0);
+    return limits.length ? Math.min(...limits) : 0;
+  }
+  function candidatesFor(settings) {
+    if (settings.apiPoolEnabled !== true) {
+      const ref = settings.apiSource === 'tavern' ? 'tavern:' + settings.tavernProfileId : settings.apiProfileId ? 'custom:' + settings.apiProfileId : 'manual';
+      const name = listApiConnections().find(row => row.ref === ref)?.name || (settings.apiSource === 'tavern' ? '酒馆连接' : '当前连接');
+      return [{ ref, name, settings }];
+    }
+    const refs = [...new Set(Array.isArray(settings.apiPool) ? settings.apiPool.filter(ref => typeof ref === 'string') : [])];
+    if (!refs.length) throw new Error('已启用负载均衡，请至少勾选一条 API 连接');
+    const custom = listApiProfiles(), tavern = getTavernProfiles();
+    return refs.map(ref => {
+      const fromTavern = ref.startsWith('tavern:');
+      const profile = (fromTavern ? tavern : custom).find(p => (fromTavern ? 'tavern:' : 'custom:') + p.id === ref);
+      const next = fromTavern ? { ...settings, apiSource: 'tavern', tavernProfileId: profile?.id || '' }
+        : { ...settings, ...connectionFields(profile), apiSource: 'custom', apiProfileId: profile?.id || '' };
+      if (fromTavern && profile?.model) next.model = profile.model;
+      return { ref, name: profile?.name || ref + '（不可用）', settings: next,
+        error: profile ? null : new Error('连接已删除或不可用，请在 API 设置中重新选择') };
+    });
+  }
+  async function chooseCandidate(candidates, attempted, settings, signal) {
+    const scopeKey = 'scope:' + scopeOf(settings), poolKey = scopeOf(settings);
+    const pick = candidate => {
+      if (settings.apiPoolEnabled === true) nextConnections.set(poolKey, candidates[(candidates.indexOf(candidate) + 1) % candidates.length].ref);
+      return candidate;
+    };
+    while (true) {
+      checkAbort(signal);
+      const startRef = nextConnections.get(poolKey);
+      const start = Math.max(0, candidates.findIndex(row => row.ref === startRef));
+      const ordered = candidates.map((_, offset) => candidates[(start + offset) % candidates.length]).filter(row => !attempted.has(row.ref));
+      if (!ordered.length) return null;
+      const now = Date.now();
+      const globalWait = waitFor(scopeKey, rpm(settings.apiRpmLimit), now);
+      let shortest = Infinity;
+      for (const candidate of ordered) {
+        if (candidate.error) return pick(candidate);
+        const wait = Math.max(globalWait, waitFor(quotaKey(candidate.settings), connectionLimit(candidate), now));
+        if (!wait) {
+          // 检查与占位同步执行，多个并发调用也不能取得同一个 RPM 余量。
+          bucket(scopeKey, now).push(now); bucket(quotaKey(candidate.settings), now).push(now);
+          return pick(candidate);
+        }
+        shortest = Math.min(shortest, wait);
+      }
+      statusUpdate(settings, `等待 RPM 额度，约 ${Math.ceil(shortest / 1000)} 秒`, 'waiting', null, now + shortest);
+      await sleepAbortable(shortest, signal);
+    }
+  }
+  // 即使某个服务没有正确响应 AbortSignal，也会停止等待；迟到结果由 Promise.race 消费并丢弃。
+  async function withRequestTimeout(work, signal, timeoutMs) {
+    checkAbort(signal);
+    const controller = new AbortController();
+    let timer, rejectStopped;
+    const stopped = new Promise((_, reject) => { rejectStopped = reject; });
+    const abort = () => { rejectStopped(abortError()); controller.abort(); };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (Number(timeoutMs) > 0) timer = setTimeout(() => { rejectStopped(timeoutError(timeoutMs)); controller.abort(); }, Number(timeoutMs));
+    try { return await Promise.race([Promise.resolve().then(() => { checkAbort(controller.signal); return work(controller.signal); }), stopped]); }
+    finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
+  }
   async function callTavernProfile(settings, body, signal) {
     const ctx = SillyTavern.getContext();
     const service = ctx.ConnectionManagerRequestService;
@@ -178,32 +363,15 @@ window.WORLD_ENGINE_API = (function() {
     if (!settings.tavernProfileId) throw new Error('请先选择酒馆连接配置');
     const profile = getTavernProfiles().find(p => p.id === settings.tavernProfileId);
     if (!profile) throw new Error('酒馆连接配置不存在或已禁用，请重新选择');
-    const controller = new AbortController();
-    let timer;
-    const aborted = () => { controller.abort(); };
-    if (signal?.aborted) controller.abort();
-    else signal?.addEventListener('abort', aborted, { once: true });
-    let rejectAbort;
-    const stopped = new Promise((_, reject) => { rejectAbort = reject; });
-    const onAbort = () => rejectAbort(Object.assign(new Error('已中止'), { name: 'AbortError' }));
-    controller.signal.addEventListener('abort', onAbort, { once: true });
-    try {
-      if (controller.signal.aborted) throw Object.assign(new Error('已中止'), { name: 'AbortError' });
-      if (Number(settings.apiTimeoutMs) > 0) timer = setTimeout(() => {
-        rejectAbort(timeoutError(settings.apiTimeoutMs)); controller.abort();
-      }, Number(settings.apiTimeoutMs));
+    return withRequestTimeout(async requestSignal => {
       // 指定 profile 发请求，不切换正文连接；密钥由酒馆以 secret-id 解析。
-      const result = await Promise.race([service.sendRequest(profile.id, body.messages, body.max_tokens,
-        { stream: false, signal: controller.signal, extractData: true, includePreset: false, includeInstruct: false },
-        { temperature: body.temperature }), stopped]);
+      const result = await service.sendRequest(profile.id, body.messages, body.max_tokens,
+        { stream: false, signal: requestSignal, extractData: true, includePreset: false, includeInstruct: false },
+        { temperature: body.temperature });
       const content = typeof result === 'string' ? result : result?.content;
       if (typeof content !== 'string' || !content.trim()) throw new Error('酒馆连接返回了空内容');
       return content;
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', aborted);
-      controller.signal.removeEventListener('abort', onAbort);
-    }
+    }, signal, settings.apiTimeoutMs);
   }
 
   // [FIX] 规整 chat/completions URL：只补 /chat/completions，不再替用户塞 /v1 等版本前缀。
@@ -237,7 +405,7 @@ window.WORLD_ENGINE_API = (function() {
   }
 
   function timeoutError(timeoutMs) {
-    return new Error('API 请求超时（' + Math.max(1, Math.ceil(timeoutMs / 1000)) + 's 无响应），已中止本次请求');
+    return Object.assign(new Error('API 请求超时（' + Math.max(1, Math.ceil(timeoutMs / 1000)) + 's 内未收到完整响应），已停止等待本次请求'), { name: 'TimeoutError' });
   }
 
   function timeoutSeconds(timeoutMs) {
@@ -279,41 +447,37 @@ window.WORLD_ENGINE_API = (function() {
     const text = result && result.text;
     if (data && data.error && data.error.message) return data.error.message;
     if (data) return JSON.stringify(data);
-    return text ? String(text).slice(0, 500) : '';
+    return text ? String(text) : '';
+  }
+
+  function responseError(result, label) {
+    const status = Number(result.resp.status) || null;
+    const error = new Error(`${label || 'API'}${status ? ' HTTP ' + status : ''}: ${responseDetail(result) || '返回错误'}`);
+    error.status = status; error.responseBody = result.text;
+    if (status === 429 || /rate.limit|too.many.requests/i.test(String(result.data?.error?.code || ''))) {
+      error.rateLimited = true;
+      const after = String(result.resp.headers?.get?.('retry-after') || '').trim();
+      error.retryAfterMs = after ? Math.max(0, Number.isFinite(Number(after)) ? Number(after) * 1000 : Date.parse(after) - Date.now()) : 60000;
+      if (!Number.isFinite(error.retryAfterMs)) error.retryAfterMs = 60000;
+    }
+    return error;
   }
 
   function requireJson(result, label) {
     if (result.parseError) {
-      throw new Error((label || 'API') + ' 返回不是有效 JSON：' + result.parseError.message);
+      const error = new Error((label || 'API') + ' 返回不是有效 JSON：' + result.parseError.message);
+      error.status = Number(result.resp.status) || null; error.responseBody = result.text;
+      throw error;
     }
     return result.data || {};
   }
 
   // 超时覆盖完整请求生命周期：fetch resolve 只代表响应头到达，正文读取仍可能卡住。
   async function fetchResponseWithTimeout(url, options, signal, timeoutMs) {
-    timeoutMs = Number(timeoutMs) || 0;
-    if (!(timeoutMs > 0)) {
-      const resp = await fetch(url, { ...options, signal: signal || null });
-      return readResponseBody(resp);
-    }
-    const controller = new AbortController();
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
-    const onExternalAbort = () => controller.abort();
-    if (signal) {
-      if (signal.aborted) controller.abort();
-      else signal.addEventListener('abort', onExternalAbort, { once: true });
-    }
-    try {
-      const resp = await fetch(url, { ...options, signal: controller.signal });
+    return withRequestTimeout(async requestSignal => {
+      const resp = await fetch(url, { ...options, signal: requestSignal });
       return await readResponseBody(resp);
-    } catch (e) {
-      if (timedOut) throw timeoutError(timeoutMs);
-      throw e;
-    } finally {
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', onExternalAbort);
-    }
+    }, signal, timeoutMs);
   }
 
   // [FIX] 经酒馆服务端转发的推演调用：浏览器 → 同源酒馆后端（无 CORS）→ 服务端代发到第三方 API。
@@ -339,18 +503,20 @@ window.WORLD_ENGINE_API = (function() {
     }, signal, settings.apiTimeoutMs);
     const resp = result.resp;
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}: ${responseDetail(result)}`);
+      throw responseError(result, '酒馆代理');
     }
     const data = requireJson(result, '酒馆代理');
     if (data && data.error) {
-      throw new Error('酒馆代理返回错误：' + (data.error.message || JSON.stringify(data.error)));
+      throw responseError(result, '酒馆代理');
     }
     const choice = data.choices?.[0];
-    if (!choice) throw new Error('API 返回缺少 choices[0]');
+    if (!choice) throw Object.assign(new Error('API 返回缺少 choices[0]'), { responseBody: result.text, status: resp.status });
     if (choice.finish_reason === 'length') {
       console.warn('[世界引擎] API 输出达到长度上限，将读取截断前已完整返回的字段');
     }
-    return choice.message?.content || '';
+    const content = choice.message?.content;
+    if (typeof content !== 'string' || !content.trim()) throw Object.assign(new Error('API 返回空内容'), { responseBody: result.text, status: resp.status });
+    return content;
   }
 
   /**
@@ -360,6 +526,43 @@ window.WORLD_ENGINE_API = (function() {
     const settings = settingsOverride
       ? { ...REQUEST_DEFAULTS, ...settingsOverride }
       : getSettings();
+    const candidates = candidatesFor(settings), attempted = new Set();
+    let lastError;
+    try {
+      while (attempted.size < candidates.length) {
+        const candidate = await chooseCandidate(candidates, attempted, settings, signal);
+        if (!candidate) break;
+        attempted.add(candidate.ref);
+        statusUpdate(settings, '正在请求 ' + candidate.name, 'requesting', candidate);
+        try {
+          if (candidate.error) throw candidate.error;
+          const content = await sendApi(prompt, maxTokens, temperature, signal, candidate.settings);
+          checkAbort(signal);
+          statusUpdate(settings, candidate.name + ' 请求成功', 'success', candidate);
+          return content;
+        } catch (error) {
+          checkAbort(signal);
+          lastError = recordApiError(error, candidate.settings, candidate);
+          if (lastError.rateLimited && !candidate.error) {
+            const pause = lastError.retryAfterMs != null && Number.isFinite(Number(lastError.retryAfterMs)) ? Math.max(0, Number(lastError.retryAfterMs)) : 60000;
+            blockedUntil.set(quotaKey(candidate.settings), Date.now() + pause);
+          }
+          if (attempted.size < candidates.length) statusUpdate(settings, candidate.name + ' 请求失败，切换下一条连接', 'switching', candidate);
+        }
+      }
+      if (candidates.length > 1) lastError.message = `连接池全部失败（${candidates.length} 条）：${lastError.connection}：${lastError.message}`;
+      statusUpdate(settings, lastError?.message || '请求失败', 'failed', { name: lastError?.connection || '' });
+      throw lastError || new Error('没有可用的 API 连接');
+    } catch (error) {
+      if (signal?.aborted) {
+        statusUpdate(settings, '已中止', 'stopped');
+        throw abortError();
+      }
+      throw error;
+    }
+  }
+
+  async function sendApi(prompt, maxTokens, temperature, signal, settings) {
     const selectedTemperature = temperature ?? settings.temperature;
     const configuredMaxTokens = Math.max(1, parseInt(maxTokens ?? settings.maxTokens) || 65000);
     // 兼容旧设置：曾保存为 4096 的输出上限自动提升到 65000。
@@ -399,16 +602,19 @@ window.WORLD_ENGINE_API = (function() {
     const resp = result.resp;
 
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}: ${responseDetail(result)}`);
+      throw responseError(result, 'API');
     }
 
     const data = requireJson(result, 'API');
+    if (data.error) throw responseError(result, 'API');
     const choice = data.choices?.[0];
-    if (!choice) throw new Error('API 返回缺少 choices[0]');
+    if (!choice) throw Object.assign(new Error('API 返回缺少 choices[0]'), { responseBody: result.text, status: resp.status });
     if (choice.finish_reason === 'length') {
       console.warn('[世界引擎] API 输出达到长度上限，将读取截断前已完整返回的字段');
     }
-    return choice.message?.content || '';
+    const content = choice.message?.content;
+    if (typeof content !== 'string' || !content.trim()) throw Object.assign(new Error('API 返回空内容'), { responseBody: result.text, status: resp.status });
+    return content;
   }
 
   function repairTruncatedJSON(content) {
@@ -501,6 +707,14 @@ window.WORLD_ENGINE_API = (function() {
     const settings = settingsOverride
       ? { ...REQUEST_DEFAULTS, ...settingsOverride }
       : getSettings();
+    try { return await fetchModels(settings); }
+    catch (error) {
+      const candidate = candidatesFor({ ...settings, apiPoolEnabled: false })[0];
+      throw recordApiError(error, settings, candidate);
+    }
+  }
+
+  async function fetchModels(settings) {
     if (settings.apiSource === 'tavern') {
       const profile = getTavernProfiles().find(p => p.id === settings.tavernProfileId);
       if (!profile?.model) throw new Error('请先选择有效的酒馆连接配置');
@@ -520,9 +734,9 @@ window.WORLD_ENGINE_API = (function() {
           proxy_password: settings.apiKey || ''
         })
       }, null, settings.apiTimeoutMs);
-      if (!result.resp.ok) throw new Error(`HTTP ${result.resp.status}: ${responseDetail(result)}`);
+      if (!result.resp.ok) throw responseError(result, '酒馆代理模型列表');
       const data = requireJson(result, '酒馆代理');
-      if (data && data.error) throw new Error('酒馆代理拉取模型失败（请检查 URL/密钥是否正确）');
+      if (data && data.error) throw responseError(result, '酒馆代理模型列表');
       if (data.data && Array.isArray(data.data)) {
         return data.data.map(m => m.id);
       }
@@ -534,13 +748,16 @@ window.WORLD_ENGINE_API = (function() {
     if (settings.apiKey) headers['Authorization'] = 'Bearer ' + settings.apiKey;
 
     const result = await fetchResponseWithTimeout(url, { headers }, null, settings.apiTimeoutMs);
-    if (!result.resp.ok) throw new Error(`HTTP ${result.resp.status}: ${responseDetail(result)}`);
+    if (!result.resp.ok) throw responseError(result, '模型列表');
     const data = requireJson(result, 'API');
+    if (data.error) throw responseError(result, '模型列表');
     if (data.data && Array.isArray(data.data)) {
       return data.data.map(m => m.id);
     }
     throw new Error('无法解析模型列表');
   }
 
-  return { callApi, parseJSON, getSettings, fetchModelList, listApiProfiles, saveApiProfile, deleteApiProfile, getTavernProfiles };
+  return { callApi, parseJSON, getSettings, fetchModelList, listApiProfiles, saveApiProfile, deleteApiProfile, getTavernProfiles,
+    listApiConnections, getConnectionRpm, setConnectionRpm, getApiErrors, clearApiErrors,
+    getRoutingStatus: scope => routingStatus.get(scope || 'world') || null };
 })();
