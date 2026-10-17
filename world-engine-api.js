@@ -181,7 +181,6 @@ window.WORLD_ENGINE_API = (function() {
     } catch (_) { return []; }
   }
 
-  const LIMITS_KEY = 'world_engine_api_rpm_limits';
   const ERRORS_KEY = 'world_engine_api_errors';
   const rpmWindows = new Map();
   const blockedUntil = new Map();
@@ -198,11 +197,6 @@ window.WORLD_ENGINE_API = (function() {
       ...listApiProfiles().map(p => ({ ref: 'custom:' + p.id, name: p.name, source: 'custom', model: p.model })),
       ...getTavernProfiles().map(p => ({ ref: 'tavern:' + p.id, name: p.name, source: 'tavern', model: p.model }))
     ];
-  }
-  function getConnectionRpm(ref) { return rpm(readGlobal(LIMITS_KEY, {})[ref]); }
-  function setConnectionRpm(ref, value) {
-    if (!/^(custom|tavern):.+/.test(ref)) throw new Error('请选择已保存的连接');
-    window.WORLD_ENGINE_STORE.setItem(LIMITS_KEY, JSON.stringify({ ...readGlobal(LIMITS_KEY, {}), [ref]: rpm(value) }));
   }
   function redact(value, settings) {
     let text = errorText(value);
@@ -282,19 +276,12 @@ window.WORLD_ENGINE_API = (function() {
   }
   function waitFor(key, limit, now) {
     const times = bucket(key, now);
-    return Math.max(0, (blockedUntil.get(key) || 0) - now, limit > 0 && times.length >= limit ? times[times.length - limit] + 60000 - now : 0);
+    return Math.max(0, limit > 0 && times.length >= limit ? times[times.length - limit] + 60000 - now : 0);
   }
   function quotaKey(settings) {
-    // 自定义连接的同地址、同密钥别名共用计数；此身份只留在内存，不持久化或输出。
+    // 自定义连接的同地址、同密钥别名共用 429 冷却；此身份只留在内存，不持久化或输出。
     return settings.apiSource === 'tavern' ? 'tavern:' + settings.tavernProfileId
       : 'custom:' + normalizeUrl(settings.apiUrl || '') + '\n' + (settings.apiKey || '');
-  }
-  function connectionLimit(candidate) {
-    const settings = candidate.settings;
-    if (settings.apiSource === 'tavern') return getConnectionRpm(candidate.ref);
-    const same = listApiProfiles().filter(p => normalizeUrl(p.apiUrl || '') === normalizeUrl(settings.apiUrl || '') && p.apiKey === settings.apiKey);
-    const limits = [getConnectionRpm(candidate.ref), ...same.map(p => getConnectionRpm('custom:' + p.id))].filter(value => value > 0);
-    return limits.length ? Math.min(...limits) : 0;
   }
   function candidatesFor(settings) {
     if (settings.apiPoolEnabled !== true) {
@@ -332,10 +319,10 @@ window.WORLD_ENGINE_API = (function() {
       let shortest = Infinity;
       for (const candidate of ordered) {
         if (candidate.error) return pick(candidate);
-        const wait = Math.max(globalWait, waitFor(quotaKey(candidate.settings), connectionLimit(candidate), now));
+        const wait = Math.max(globalWait, (blockedUntil.get(quotaKey(candidate.settings)) || 0) - now);
         if (!wait) {
           // 检查与占位同步执行，多个并发调用也不能取得同一个 RPM 余量。
-          bucket(scopeKey, now).push(now); bucket(quotaKey(candidate.settings), now).push(now);
+          bucket(scopeKey, now).push(now);
           return pick(candidate);
         }
         shortest = Math.min(shortest, wait);
@@ -758,6 +745,6 @@ window.WORLD_ENGINE_API = (function() {
   }
 
   return { callApi, parseJSON, getSettings, fetchModelList, listApiProfiles, saveApiProfile, deleteApiProfile, getTavernProfiles,
-    listApiConnections, getConnectionRpm, setConnectionRpm, getApiErrors, clearApiErrors,
+    listApiConnections, getApiErrors, clearApiErrors,
     getRoutingStatus: scope => routingStatus.get(scope || 'world') || null };
 })();

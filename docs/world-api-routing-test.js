@@ -115,31 +115,17 @@ async function main() {
   for (let i = 0; i < 8; i++) await unlimited.call();
   assert.equal(unlimited.requests.length, 8, '默认 RPM 不限');
 
-  const perConnection = harness();
-  perConnection.api.setConnectionRpm(perConnection.a, 1);
-  await perConnection.call(); await perConnection.call(); await perConnection.call();
-  assert.deepEqual(perConnection.requests.map(row => row.kind), ['A', 'B', 'B'], '有空闲连接时跳过暂时耗尽额度的连接');
-  const saturated = harness();
-  saturated.api.setConnectionRpm(saturated.a, 1); saturated.api.setConnectionRpm(saturated.b, 1);
-  await saturated.call(); await saturated.call();
-  const saturatedWait = saturated.call(); await flush();
-  assert.equal(saturated.requests.length, 2);
-  await saturated.timer.advance(60000); assert.equal(await saturatedWait, 'A', '所有连接都到上限时等待最早恢复的额度');
-  const shared = harness();
-  shared.api.setConnectionRpm(shared.a, 1);
-  await shared.call(shared.single);
-  const memory = shared.call({ ...shared.single, apiScope: 'memory' });
-  await flush(); assert.equal(shared.requests.length, 1);
-  await shared.timer.advance(60000); await memory;
-  assert.equal(shared.requests.length, 2, '同一连接跨引擎共用 RPM 计数');
-  const aliases = harness();
-  const alias = aliases.api.saveApiProfile('A 的另一个名字', aliases.aProfile);
-  aliases.api.setConnectionRpm(aliases.a, 1);
-  const aliasSettings = { ...aliases.settings, apiPool: [aliases.a, 'custom:' + alias.id] };
-  await aliases.call(aliasSettings);
-  const aliasPending = aliases.call(aliasSettings); await flush();
-  assert.equal(aliases.requests.length, 1, '同地址同密钥别名不能绕过限额');
-  await aliases.timer.advance(60000); await aliasPending;
+  const legacy = harness();
+  legacy.values.set('world_engine_api_rpm_limits', JSON.stringify({ [legacy.a]: 1, [legacy.b]: 1 }));
+  for (let i = 0; i < 6; i++) await legacy.call();
+  await legacy.call({ ...legacy.single, apiScope: 'memory' });
+  await legacy.call({ ...legacy.single, apiScope: 'memory' });
+  assert.deepEqual(legacy.requests.map(row => row.kind), ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'A']);
+  assert.ok(legacy.requests.every(row => row.at === 0), '升级后旧单连接 RPM 不得继续造成隐藏限流');
+  const scopes = harness();
+  await scopes.call({ ...scopes.settings, apiRpmLimit: 1 });
+  await scopes.call({ ...scopes.settings, apiScope: 'memory', apiRpmLimit: 1 });
+  assert.equal(scopes.requests.length, 2, '两个引擎各自的全局 RPM 互不占用');
 
   const cancelled = harness();
   await cancelled.call({ ...cancelled.single, apiRpmLimit: 1 });
@@ -248,7 +234,7 @@ async function main() {
   assert.equal(world.core.loadState().worldDigest, digest);
   assert.equal(realEvolution.getBackfillJob().nextLayer, 5);
   assert.equal(worldClock.pending(), 0);
-  console.log('✓ API 轮换：混合连接、并发公平、超时与迟到丢弃、RPM/别名/跨引擎、取消、429 冷却、完整脱敏报错及有限故障转移通过');
+  console.log('✓ API 轮换：混合连接、并发公平、超时与迟到丢弃、全局 RPM、旧限额失效、取消、429 冷却、完整脱敏报错及有限故障转移通过');
 }
 const watchdog = setTimeout(() => { console.error('API 调度测试未能完成'); process.exitCode = 1; }, 5000);
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(watchdog));

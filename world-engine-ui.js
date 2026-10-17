@@ -1441,10 +1441,10 @@ window.WORLD_ENGINE_UI = (function() {
         </div>
       </div>
       <div class="we-section" style="margin-top:10px;">
-        <div class="we-section-title">v1.2.0 · API 轮换与限流</div>
+        <div class="we-section-title">v1.2.1 · API 下拉多选与全局 RPM</div>
         <ul class="we-changelog-items">
-          <li>可多选已保存连接及酒馆配置，成功、超时或报错后轮换；记忆与世界分别保存选择。</li>
-          <li>支持引擎总 RPM 和连接 RPM，默认不限；同一连接在两引擎之间共用计数。</li>
+          <li>通过下拉菜单多选已保存连接及酒馆预设，收起后显示已选摘要；成功、超时或报错后轮换。</li>
+          <li>RPM 仅保留本引擎的全局上限，默认不限；不再读取旧单连接限额。记忆与世界分别保存选择及全局 RPM。</li>
           <li>新增 API 报错详情，保留供应商错误正文和酒馆请求服务提供的原因。</li>
         </ul>
       </div>
@@ -1987,6 +1987,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.3.1', date: '2026-10-17', items: ['负载均衡改为分组下拉多选，默认收起，仅显示已选连接摘要；关闭功能时隐藏选择区。', 'RPM 仅保留本引擎的全局上限，移除单连接设置与旧限额的运行逻辑，继续支持 429 自动冷却。', '记忆引擎同步升级至 1.2.1，使用相同的下拉多选与全局 RPM 设置。'] },
     { version: '3.3.0', date: '2026-10-17', items: ['新增多 API 负载均衡，可混选已保存连接与酒馆配置，按顺序轮换并在超时或报错后切换；迟到结果丢弃。', '新增引擎总 RPM 与单连接 RPM，默认不限；重试计数、额度等待、取消和 429 冷却统一处理。', '新增 API 报错详情，展示连接、HTTP 状态、供应商返回正文及酒馆错误原因；已知密钥脱敏，成功切换后仍可查阅。', '记忆引擎升级至 1.2.0，独立选择连接池与总 RPM；同一连接的额度由世界与记忆共同遵守。'] },
     { version: '3.2.0', date: '2026-10-16', items: ['世界状态和事件、风声等信息增加剧情时间标注，分别记录首次记录、最近变化、实际发生及预计/截止时间。', '与世界推演共用请求，从本次正文提取时间并核验原文依据；未知、沿用及手动修正分别保存。', '面板支持查看和修改时间，推演上下文、正文注入和重大事件账本同步携带时间。', '回填按目标历史正文提取，楼层回退与分支同步恢复；旧存档缺失时间保持未知，现有按轮机制继续保留。'] },
     { version: '3.1.0', date: '2026-10-16', items: ['新增 API 连接库及酒馆连接配置调用，世界与记忆引擎独立选择连接。', '支持按聊天楼层继续补齐、指定范围重算和从头重建；失败或刷新后可断点续传。', '新增随消息保存的世界历史及回复版本快照，支持删除回退和原生分支/checkpoint继承；手动编辑正文不触发世界更新。', '世界历史默认保留最近200个聊天楼层，可调整或设为不限；定期完整快照与差分记录共同保存。'] },
@@ -3509,16 +3510,38 @@ window.WORLD_ENGINE_UI = (function() {
       + '</div>';
   }
 
-  function renderApiPoolRows(settings) {
+  function apiPoolConnections(settings) {
     const api = window.WORLD_ENGINE_API;
     const selected = new Set(Array.isArray(settings.apiPool) ? settings.apiPool : []);
     const rows = api?.listApiConnections?.() || [];
     for (const ref of selected) if (!rows.some(row => row.ref === ref)) rows.push({ ref, name: ref + '（不可用）', source: 'missing' });
-    return rows.map(row => `<div class="we-api-pool-row">
-      <label><input type="checkbox" class="we-api-pool-ref" data-api-ref="${h(row.ref)}" ${selected.has(row.ref) ? 'checked' : ''}>
-      <span>${h(row.name)}<small>${row.source === 'tavern' ? '酒馆配置' : row.source === 'custom' ? '已保存连接' : '不可用'}${row.model ? ' · ' + h(row.model) : ''}</small></span></label>
-      <label class="we-api-rpm-label">连接 RPM<input type="number" class="we-api-connection-rpm" data-api-ref="${h(row.ref)}" min="0" step="1" value="${api?.getConnectionRpm?.(row.ref) || 0}" title="0 表示不限；此连接的限制由世界与记忆请求共用"></label>
-    </div>`).join('') || '<div class="we-hint">先保存 API 连接或在酒馆中创建连接配置，即可加入轮换列表。</div>';
+    return rows;
+  }
+
+  function renderApiPoolSelection(settings, rows = apiPoolConnections(settings)) {
+    const selected = new Set(settings.apiPool || []);
+    const names = rows.filter(row => selected.has(row.ref)).map(row => row.name);
+    const title = names.join('、') || '选择参与轮换的 API';
+    return `<span class="we-api-pool-value" title="${h(title)}">${h(title)}</span>
+      <span class="we-api-pool-count" aria-live="polite">${names.length ? '已选 ' + names.length + ' 项' : '可多选'}</span><span class="we-api-pool-arrow" aria-hidden="true"></span>`;
+  }
+
+  function renderApiPoolSelector(settings) {
+    const rows = apiPoolConnections(settings);
+    const selected = new Set(settings.apiPool || []);
+    const groups = [['custom', '已保存连接'], ['tavern', '酒馆预设'], ['missing', '不可用连接']];
+    const options = groups.map(([source, label]) => {
+      const items = rows.filter(row => row.source === source);
+      if (!items.length) return '';
+      return `<div class="we-api-pool-group" role="group" aria-label="${label}">
+        <div class="we-api-pool-group-title">${label}</div>${items.map(row => `
+        <label class="we-api-pool-option"><input type="checkbox" class="we-api-pool-ref" data-api-ref="${h(row.ref)}" ${selected.has(row.ref) ? 'checked' : ''}>
+          <span>${h(row.name)}${row.model ? '<small>' + h(row.model) + '</small>' : ''}</span></label>`).join('')}</div>`;
+    }).join('') || '<div class="we-api-pool-empty">先保存 API 连接，或在酒馆中创建连接预设。</div>';
+    return `<details class="we-api-pool-select" id="we-api-pool-select">
+      <summary id="we-api-pool-summary" aria-label="选择参与负载均衡的 API，可多选">${renderApiPoolSelection(settings, rows)}</summary>
+      <div class="we-api-pool-menu">${options}</div>
+    </details>`;
   }
 
   function renderApiErrors(scope) {
@@ -3548,13 +3571,14 @@ window.WORLD_ENGINE_UI = (function() {
     const scope = settings.apiScope === 'memory' ? 'memory' : 'world';
     return `<div class="we-input-group">
       <label><input type="checkbox" id="we-api-pool-enabled" ${settings.apiPoolEnabled === true ? 'checked' : ''}> 启用多 API 负载均衡</label>
-      <div class="we-hint">勾选连接并保存设置后，按列表顺序轮换。成功、超时或报错后使用下一条；每次推演顺序请求。上方“请求超时”控制每条连接的等待时长，0 表示不限时。轮换使用已保存的地址、密钥和模型，编辑后需先点“更新连接”。</div>
-      <div id="we-api-pool-rows">${renderApiPoolRows(settings)}</div>
-      <div class="we-hint">每条连接的 RPM 即时保存，世界与记忆共用。同地址、同密钥的自定义连接共用额度；0 表示不限。</div>
+      <div id="we-api-pool-config" ${settings.apiPoolEnabled === true ? '' : 'hidden'}>
+        <div id="we-api-pool-selector">${renderApiPoolSelector(settings)}</div>
+        <div class="we-hint">保存后按所选连接依次轮换；超时或报错时切换下一条。等待时长使用上方“请求超时”。</div>
+      </div>
     </div>
-    <div class="we-input-group"><label>本引擎每分钟最多请求数（RPM）</label>
+    <div class="we-input-group"><label for="we-api-rpm">全局 RPM</label>
       <input type="number" id="we-api-rpm" min="0" step="1" value="${Math.max(0, parseInt(settings.apiRpmLimit) || 0)}">
-      <div class="we-hint">0 表示不限。总量与连接各自的上限同时生效；重试及切换请求也计数。额度不足时等待，可停止任务；等待额度不计入请求超时。</div>
+      <div class="we-hint">本引擎所有 API 合计每分钟最多请求数，0 表示不限。重试与切换也计数，达到上限后自动等待。</div>
       <div class="we-hint" id="we-api-routing-status">${h(window.WORLD_ENGINE_API?.getRoutingStatus?.(scope)?.message || '')}</div>
     </div>
     <details class="we-api-errors-panel"><summary>API 报错详情</summary>
@@ -3572,14 +3596,37 @@ window.WORLD_ENGINE_UI = (function() {
     };
   }
 
+  let _apiPoolDismissBound = false;
   function bindApiRoutingControls() {
     const api = window.WORLD_ENGINE_API;
-    document.querySelectorAll('.we-api-connection-rpm').forEach(input => {
+    document.querySelectorAll('.we-api-pool-ref').forEach(input => {
       input.onchange = () => {
-        input.value = String(Math.max(0, parseInt(input.value) || 0));
-        api.setConnectionRpm(input.dataset.apiRef, input.value);
+        const summary = document.getElementById('we-api-pool-summary');
+        if (summary) summary.innerHTML = renderApiPoolSelection(readApiRoutingForm());
       };
     });
+    const selector = document.getElementById('we-api-pool-select');
+    if (selector) {
+      selector.onkeydown = event => {
+        if (event.key !== 'Escape' || !selector.open) return;
+        event.preventDefault(); event.stopPropagation(); selector.open = false;
+        selector.querySelector('summary')?.focus();
+      };
+      selector.onfocusout = event => { if (!selector.contains(event.relatedTarget)) selector.open = false; };
+    }
+    const enabled = document.getElementById('we-api-pool-enabled');
+    if (enabled) enabled.onchange = () => {
+      const config = document.getElementById('we-api-pool-config');
+      if (config) config.hidden = !enabled.checked;
+      if (selector && !enabled.checked) selector.open = false;
+    };
+    if (!_apiPoolDismissBound) {
+      document.addEventListener('pointerdown', event => {
+        const current = document.getElementById('we-api-pool-select');
+        if (current && !current.contains(event.target)) current.open = false;
+      });
+      _apiPoolDismissBound = true;
+    }
     const clear = document.getElementById('we-api-errors-clear');
     if (clear) clear.onclick = () => { api.clearApiErrors(clear.dataset.apiScope); refreshApiErrors(); };
   }
@@ -3636,8 +3683,8 @@ window.WORLD_ENGINE_UI = (function() {
     const refreshChoices = patch => {
       const settings = persist(patch);
       select.innerHTML = renderApiConnectionOptions(settings);
-      const rows = document.getElementById('we-api-pool-rows');
-      if (rows) rows.innerHTML = renderApiPoolRows(settings);
+      const selector = document.getElementById('we-api-pool-selector');
+      if (selector) selector.innerHTML = renderApiPoolSelector(settings);
       bindApiRoutingControls(); updateAvailability();
     };
     select.onchange = () => {

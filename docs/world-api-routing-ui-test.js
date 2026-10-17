@@ -1,4 +1,4 @@
-// node docs/world-api-routing-ui-test.js — 真实 API 配置表单、限额保存及错误展示。
+// node docs/world-api-routing-ui-test.js — 真实 API 下拉多选表单、全局限额及错误展示。
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -6,13 +6,14 @@ const vm = require('vm');
 const { harness } = require('./world-backfill-test');
 async function main() {
   const h = harness(), ids = new Map();
-  let checks = [], rpmInputs = [];
+  let checks = [];
+  const listeners = new Map();
   h.sandbox.setTimeout = setTimeout; h.sandbox.clearTimeout = clearTimeout;
   h.sandbox.fetch = async () => ({ ok: false, status: 503, text: async () => '<script>供应商错误</script>' });
-  h.sandbox.document = { addEventListener() {}, getElementById: id => ids.get(id) || null,
+  h.sandbox.document = { addEventListener: (name, fn) => listeners.set(name, fn), getElementById: id => ids.get(id) || null,
     querySelectorAll(selector) {
-      if (selector === '.we-api-pool-ref:checked') return checks;
-      if (selector === '.we-api-connection-rpm') return rpmInputs;
+      if (selector === '.we-api-pool-ref:checked') return checks.filter(input => input.checked);
+      if (selector === '.we-api-pool-ref') return checks;
       return [];
     } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../world-engine-api.js'), 'utf8'), h.sandbox);
@@ -21,27 +22,52 @@ async function main() {
   const ref = 'custom:' + profile.id;
   let source = fs.readFileSync(path.join(__dirname, '../world-engine-ui.js'), 'utf8');
   source = source.replace('    buildPanel, buildInputButton, showPanel, hidePanel, togglePanel, refresh, setStatus,',
-    '    _test: { renderApiRoutingSettings, renderApiPoolRows, renderApiErrors, readApiConnectionForm, bindApiRoutingControls, setFace: id => { _engineFace = id; } },\n    buildPanel, buildInputButton, showPanel, hidePanel, togglePanel, refresh, setStatus,');
+    '    _test: { renderApiRoutingSettings, renderApiPoolSelector, renderApiErrors, readApiConnectionForm, bindApiRoutingControls, setFace: id => { _engineFace = id; } },\n    buildPanel, buildInputButton, showPanel, hidePanel, togglePanel, refresh, setStatus,');
   vm.runInNewContext(source, h.sandbox, { filename: 'world-engine-ui.js' });
   const ui = h.sandbox.WORLD_ENGINE_UI._test;
   const form = ui.renderApiRoutingSettings({ apiPoolEnabled: true, apiPool: [ref, 'tavern:已删除'], apiRpmLimit: 2 });
   assert.ok(form.includes('&lt;供应商 A&gt;'));
   assert.ok(form.includes('tavern:已删除'));
   assert.ok(form.includes('不可用'), '失效的已选连接必须保留提示，不能悄悄消失');
+  assert.ok(form.includes('<details class="we-api-pool-select" id="we-api-pool-select">'), '连接列表必须默认收起');
+  assert.ok(form.includes('已选 2 项'));
+  assert.ok(form.includes('aria-label="已保存连接"'));
+  assert.ok(!form.includes('连接 RPM'));
   assert.ok(form.includes('id="we-api-rpm" min="0" step="1" value="2"'));
   assert.ok(ui.renderApiRoutingSettings({ apiScope: 'memory' }).includes('data-api-scope="memory"'));
   ids.set('we-api-pool-enabled', { checked: true }); ids.set('we-api-rpm', { value: '3' });
   ids.set('we-api-profile', { value: ref });
-  checks = [{ dataset: { apiRef: ref } }, { dataset: { apiRef: 'tavern:b' } }];
+  checks = [{ checked: true, dataset: { apiRef: ref } }, { checked: true, dataset: { apiRef: 'tavern:b' } }];
   const world = ui.readApiConnectionForm();
   assert.equal(world.apiScope, 'world'); assert.equal(world.apiPoolEnabled, true);
   assert.deepEqual(Array.from(world.apiPool), [ref, 'tavern:b']); assert.equal(world.apiRpmLimit, 3);
   ui.setFace('memory');
   assert.equal(ui.readApiConnectionForm().apiScope, 'memory');
-  const input = { dataset: { apiRef: ref }, value: '4' };
-  rpmInputs = [input]; ui.bindApiRoutingControls(); input.onchange();
-  assert.equal(api.getConnectionRpm(ref), 4, '单连接 RPM 应保存到连接级全局配置');
-  input.value = '-9'; input.onchange(); assert.equal(api.getConnectionRpm(ref), 0);
+  let focused = false;
+  const summary = { innerHTML: '', focus: () => { focused = true; } };
+  const selector = { open: true, contains: target => target === summary, querySelector: () => summary };
+  ids.set('we-api-pool-summary', summary); ids.set('we-api-pool-select', selector);
+  const config = { hidden: false }; ids.set('we-api-pool-config', config);
+  ui.bindApiRoutingControls();
+  checks[1].checked = false; checks[1].onchange();
+  assert.ok(summary.innerHTML.includes('已选 1 项'));
+  assert.ok(summary.innerHTML.includes('&lt;供应商 A&gt;'));
+  assert.ok(!summary.innerHTML.includes('tavern:b'), '摘要只显示当前选中的连接');
+  assert.deepEqual(Array.from(ui.readApiConnectionForm().apiPool), [ref]);
+  checks[0].checked = false; checks[0].onchange();
+  assert.ok(summary.innerHTML.includes('选择参与轮换的 API'));
+  checks[0].checked = true;
+  selector.onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  assert.equal(selector.open, false); assert.equal(focused, true);
+  selector.open = true; listeners.get('pointerdown')({ target: summary }); assert.equal(selector.open, true);
+  listeners.get('pointerdown')({ target: {} }); assert.equal(selector.open, false);
+  selector.open = true; selector.onfocusout({ relatedTarget: summary }); assert.equal(selector.open, true);
+  selector.onfocusout({ relatedTarget: null }); assert.equal(selector.open, false);
+  ids.get('we-api-pool-enabled').checked = false; ids.get('we-api-pool-enabled').onchange();
+  assert.equal(config.hidden, true);
+  assert.deepEqual(Array.from(ui.readApiConnectionForm().apiPool), [ref], '关闭负载均衡仍保留选择');
+  ids.get('we-api-pool-enabled').checked = true; ids.get('we-api-pool-enabled').onchange();
+  assert.equal(config.hidden, false);
   await assert.rejects(api.callApi('测试', 16, 0, null, { apiUrl: profile.apiUrl, apiKey: profile.apiKey, apiProfileId: profile.id }), /供应商错误/);
   const errors = ui.renderApiErrors('world');
   assert.ok(errors.includes('&lt;script&gt;供应商错误&lt;/script&gt;'));
@@ -52,6 +78,6 @@ async function main() {
   ids.set('we-api-errors-clear', clear); ui.bindApiRoutingControls(); clear.onclick();
   assert.equal(api.getApiErrors('world').length, 1, '清理记忆报错不能清理世界报错');
   clear.dataset.apiScope = 'world'; clear.onclick(); assert.equal(api.getApiErrors().length, 0);
-  console.log('✓ API 面板：多选保存、作用域、失效连接、连接 RPM、原文错误转义与分引擎清理通过');
+  console.log('✓ API 面板：下拉多选、已选摘要、收起与隐藏、保存、全局 RPM、失效连接及错误展示通过');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
