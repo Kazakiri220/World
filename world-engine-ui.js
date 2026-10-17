@@ -1441,6 +1441,12 @@ window.WORLD_ENGINE_UI = (function() {
         </div>
       </div>
       <div class="we-section" style="margin-top:10px;">
+        <div class="we-section-title">v1.2.2 · API 多选交互调整</div>
+        <ul class="we-changelog-items">
+          <li>针对连续选择 API 时页面崩溃的报告，更换下拉展开控件；勾选时保留 DOM、焦点和滚动位置，不重建摘要。</li>
+        </ul>
+      </div>
+      <div class="we-section" style="margin-top:10px;">
         <div class="we-section-title">v1.2.1 · API 下拉多选与全局 RPM</div>
         <ul class="we-changelog-items">
           <li>通过下拉菜单多选已保存连接及酒馆预设，收起后显示已选摘要；成功、超时或报错后轮换。</li>
@@ -1987,6 +1993,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.3.2', date: '2026-10-17', items: ['针对 API 多选时页面卡死或 STATUS_BREAKPOINT 的报告，将原生 details/summary 改为普通按钮控制菜单显隐，移除失焦时自动折叠的处理。', '勾选仅更新已有文本节点，保留选项、焦点与滚动位置；不再重建摘要或重新读取连接库。', '新增完整面板浏览器回归，覆盖世界和记忆界面的连续多选、键盘、外部点击及实际保存；记忆引擎升级至 1.2.2。'] },
     { version: '3.3.1', date: '2026-10-17', items: ['负载均衡改为分组下拉多选，默认收起，仅显示已选连接摘要；关闭功能时隐藏选择区。', 'RPM 仅保留本引擎的全局上限，移除单连接设置与旧限额的运行逻辑，继续支持 429 自动冷却。', '记忆引擎同步升级至 1.2.1，使用相同的下拉多选与全局 RPM 设置。'] },
     { version: '3.3.0', date: '2026-10-17', items: ['新增多 API 负载均衡，可混选已保存连接与酒馆配置，按顺序轮换并在超时或报错后切换；迟到结果丢弃。', '新增引擎总 RPM 与单连接 RPM，默认不限；重试计数、额度等待、取消和 429 冷却统一处理。', '新增 API 报错详情，展示连接、HTTP 状态、供应商返回正文及酒馆错误原因；已知密钥脱敏，成功切换后仍可查阅。', '记忆引擎升级至 1.2.0，独立选择连接池与总 RPM；同一连接的额度由世界与记忆共同遵守。'] },
     { version: '3.2.0', date: '2026-10-16', items: ['世界状态和事件、风声等信息增加剧情时间标注，分别记录首次记录、最近变化、实际发生及预计/截止时间。', '与世界推演共用请求，从本次正文提取时间并核验原文依据；未知、沿用及手动修正分别保存。', '面板支持查看和修改时间，推演上下文、正文注入和重大事件账本同步携带时间。', '回填按目标历史正文提取，楼层回退与分支同步恢复；旧存档缺失时间保持未知，现有按轮机制继续保留。'] },
@@ -3519,29 +3526,29 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderApiPoolSelection(settings, rows = apiPoolConnections(settings)) {
-    const selected = new Set(settings.apiPool || []);
+    const selected = new Set(Array.isArray(settings.apiPool) ? settings.apiPool : []);
     const names = rows.filter(row => selected.has(row.ref)).map(row => row.name);
     const title = names.join('、') || '选择参与轮换的 API';
     return `<span class="we-api-pool-value" title="${h(title)}">${h(title)}</span>
-      <span class="we-api-pool-count" aria-live="polite">${names.length ? '已选 ' + names.length + ' 项' : '可多选'}</span><span class="we-api-pool-arrow" aria-hidden="true"></span>`;
+      <span class="we-api-pool-count">${names.length ? '已选 ' + names.length + ' 项' : '可多选'}</span><span class="we-api-pool-arrow" aria-hidden="true"></span>`;
   }
 
   function renderApiPoolSelector(settings) {
     const rows = apiPoolConnections(settings);
-    const selected = new Set(settings.apiPool || []);
+    const selected = new Set(Array.isArray(settings.apiPool) ? settings.apiPool : []);
     const groups = [['custom', '已保存连接'], ['tavern', '酒馆预设'], ['missing', '不可用连接']];
     const options = groups.map(([source, label]) => {
       const items = rows.filter(row => row.source === source);
       if (!items.length) return '';
       return `<div class="we-api-pool-group" role="group" aria-label="${label}">
         <div class="we-api-pool-group-title">${label}</div>${items.map(row => `
-        <label class="we-api-pool-option"><input type="checkbox" class="we-api-pool-ref" data-api-ref="${h(row.ref)}" ${selected.has(row.ref) ? 'checked' : ''}>
+        <label class="we-api-pool-option${selected.has(row.ref) ? ' is-selected' : ''}"><input type="checkbox" class="we-api-pool-ref" data-api-ref="${h(row.ref)}" data-api-name="${h(row.name)}" ${selected.has(row.ref) ? 'checked' : ''}>
           <span>${h(row.name)}${row.model ? '<small>' + h(row.model) + '</small>' : ''}</span></label>`).join('')}</div>`;
     }).join('') || '<div class="we-api-pool-empty">先保存 API 连接，或在酒馆中创建连接预设。</div>';
-    return `<details class="we-api-pool-select" id="we-api-pool-select">
-      <summary id="we-api-pool-summary" aria-label="选择参与负载均衡的 API，可多选">${renderApiPoolSelection(settings, rows)}</summary>
-      <div class="we-api-pool-menu">${options}</div>
-    </details>`;
+    return `<div class="we-api-pool-select" id="we-api-pool-select">
+      <button type="button" class="we-api-pool-trigger" id="we-api-pool-trigger" aria-expanded="false" aria-controls="we-api-pool-menu" aria-label="选择参与负载均衡的 API，可多选">${renderApiPoolSelection(settings, rows)}</button>
+      <div class="we-api-pool-menu" id="we-api-pool-menu" hidden>${options}</div>
+    </div>`;
   }
 
   function renderApiErrors(scope) {
@@ -3597,33 +3604,67 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   let _apiPoolDismissBound = false;
+  function setApiPoolOpen(open, focusTrigger = false) {
+    const selector = document.getElementById('we-api-pool-select');
+    const trigger = document.getElementById('we-api-pool-trigger');
+    const menu = document.getElementById('we-api-pool-menu');
+    if (!selector || !trigger || !menu) return;
+    if (menu.hidden === open) {
+      menu.hidden = !open;
+      selector.classList.toggle('is-open', open);
+      trigger.setAttribute('aria-expanded', String(open));
+    }
+    if (focusTrigger) trigger.focus({ preventScroll: true });
+  }
+
+  function updateApiPoolSelection() {
+    const trigger = document.getElementById('we-api-pool-trigger');
+    if (!trigger) return;
+    const inputs = Array.from(document.querySelectorAll('.we-api-pool-ref:checked'));
+    const title = inputs.map(input => input.dataset.apiName || input.dataset.apiRef).join('、') || '选择参与轮换的 API';
+    // 勾选时仅更新既有文本节点；保留按钮、选项、焦点和滚动位置，不重新读取连接库。
+    for (const [selector, text] of [['.we-api-pool-value', title], ['.we-api-pool-count', inputs.length ? '已选 ' + inputs.length + ' 项' : '可多选']]) {
+      const node = trigger.querySelector(selector)?.firstChild;
+      if (node && node.nodeValue !== text) node.nodeValue = text;
+    }
+    const value = trigger.querySelector('.we-api-pool-value');
+    if (value && value.title !== title) value.title = title;
+  }
+
   function bindApiRoutingControls() {
     const api = window.WORLD_ENGINE_API;
     document.querySelectorAll('.we-api-pool-ref').forEach(input => {
-      input.onchange = () => {
-        const summary = document.getElementById('we-api-pool-summary');
-        if (summary) summary.innerHTML = renderApiPoolSelection(readApiRoutingForm());
+      input.onchange = event => {
+        event.stopPropagation();
+        input.closest('.we-api-pool-option')?.classList.toggle('is-selected', input.checked);
+        updateApiPoolSelection();
       };
     });
     const selector = document.getElementById('we-api-pool-select');
+    const trigger = document.getElementById('we-api-pool-trigger');
+    const menu = document.getElementById('we-api-pool-menu');
+    if (trigger && menu) trigger.onclick = () => setApiPoolOpen(menu.hidden);
     if (selector) {
+      selector.onclick = event => event.stopPropagation();
       selector.onkeydown = event => {
-        if (event.key !== 'Escape' || !selector.open) return;
-        event.preventDefault(); event.stopPropagation(); selector.open = false;
-        selector.querySelector('summary')?.focus();
+        if (event.key === 'Escape' && menu && !menu.hidden) {
+          event.preventDefault(); event.stopPropagation(); setApiPoolOpen(false, true);
+        } else if (event.key === 'ArrowDown' && event.target === trigger) {
+          event.preventDefault(); setApiPoolOpen(true);
+          menu?.querySelector('input')?.focus({ preventScroll: true });
+        }
       };
-      selector.onfocusout = event => { if (!selector.contains(event.relatedTarget)) selector.open = false; };
     }
     const enabled = document.getElementById('we-api-pool-enabled');
     if (enabled) enabled.onchange = () => {
       const config = document.getElementById('we-api-pool-config');
       if (config) config.hidden = !enabled.checked;
-      if (selector && !enabled.checked) selector.open = false;
+      if (!enabled.checked) setApiPoolOpen(false);
     };
     if (!_apiPoolDismissBound) {
       document.addEventListener('pointerdown', event => {
         const current = document.getElementById('we-api-pool-select');
-        if (current && !current.contains(event.target)) current.open = false;
+        if (current && !current.contains(event.target)) setApiPoolOpen(false);
       });
       _apiPoolDismissBound = true;
     }
