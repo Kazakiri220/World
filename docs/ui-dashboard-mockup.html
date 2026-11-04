@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>世界引擎主界面仪表盘与快捷栏改造原型 (Phase 3 & 4)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --we-bg: #182028;
+      --we-bg2: #13232c;
+      --we-bg-hl: #24414a;
+      --we-card: #1d2833;
+      --we-card-border: rgba(208, 170, 88, 0.22);
+      --we-surface: #1f3642;
+      --we-border: rgba(208, 170, 88, 0.28);
+      --we-text: #e5f0ed;
+      --we-text2: #a7bbb7;
+      --we-text3: #6e8b88;
+      --we-accent: #58b8a9;
+      --we-accent-glow: rgba(88, 184, 169, 0.25);
+      --we-danger: #d66f68;
+      --we-success: #69b68e;
+      --we-gold: #d0aa58;
+      --we-gold-glow: rgba(208, 170, 88, 0.2);
+      --we-hairline: rgba(255, 255, 255, 0.08);
+      --we-radius: 8px;
+    }
+
+    [data-theme="night"] {
+      --we-bg: #17181c;
+      --we-bg2: #121317;
+      --we-bg-hl: #2b2e36;
+      --we-card: #1e2026;
+      --we-card-border: rgba(255, 255, 255, 0.12);
+      --we-surface: #262832;
+      --we-border: rgba(255, 255, 255, 0.16);
+      --we-text: #e8e9ec;
+      --we-text2: #b8bbc3;
+      --we-text3: #8a8e99;
+      --we-accent: #8ab4f8;
+      --we-gold: #c7a86a;
+    }
+
+    [data-theme="paper"] {
+      --we-bg: #f4f6f8;
+      --we-bg2: #eaecef;
+      --we-bg-hl: #dfe3e8;
+      --we-card: #ffffff;
+      --we-card-border: rgba(0, 0, 0, 0.12);
+      --we-surface: #f0f2f5;
+      --we-border: rgba(0, 0, 0, 0.14);
+      --we-text: #232f39;
+      --we-text2: #52606d;
+      --we-text3: #7b8794;
+      --we-accent: #267568;
+      --we-gold: #8f671b;
+      --we-hairline: rgba(0, 0, 0, 0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: #0b1116;
+      color: var(--we-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    /* 顶部控制栏 */
+    .demo-bar {
+      width: 100%;
+      max-width: 960px;
+      background: rgba(20, 30, 40, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--we-border);
+      border-radius: 12px;
+      padding: 12px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .demo-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--we-gold);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .demo-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .demo-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--we-border);
+      background: var(--we-surface);
+      color: var(--we-text);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .demo-btn.active, .demo-btn:hover {
+      background: var(--we-accent);
+      color: #fff;
+      border-color: var(--we-accent);
+    }
+
+    /* 容器 */
+    .preview-container {
+      display: flex;
+      gap: 32px;
+      justify-content: center;
+      width: 100%;
+      max-width: 1100px;
+      flex-wrap: wrap;
+    }
+
+    /* 插件面板实体模拟 */
+    .we-panel-mockup {
+      width: 420px;
+      max-width: 100%;
+      height: 800px;
+      background: var(--we-bg);
+      border: 1px solid var(--we-border);
+      border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(208,170,88,0.12);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 1. 顶部 Header */
+    .we-panel-header {
+      padding: 12px 14px 10px;
+      background: rgba(19, 35, 44, 0.65);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--we-hairline);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .we-header-main-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .we-segmented-switch {
+      display: flex;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--we-border);
+      border-radius: 20px;
+      padding: 2px;
+    }
+    .we-segmented-tab {
+      padding: 4px 12px;
+      border-radius: 16px;
+      border: none;
+      background: transparent;
+      color: var(--we-text2);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .we-segmented-tab.is-active {
+      background: var(--we-accent);
+      color: #ffffff;
+      box-shadow: 0 2px 8px var(--we-accent-glow);
+    }
+    .we-panel-corner-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .we-corner-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--we-hairline);
+      color: var(--we-text2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .we-corner-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--we-text);
+    }
+    .we-header-status-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--we-hairline);
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--we-text2);
+    }
+    .status-left, .status-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--we-accent);
+      box-shadow: 0 0 6px var(--we-accent);
+    }
+
+    /* 2. 二级分类胶囊栏 (Category Chips) —— 解决反复点返回的痛点 */
+    .we-category-chips-bar {
+      padding: 8px 12px 6px;
+      background: var(--we-bg2);
+      border-bottom: 1px solid var(--we-hairline);
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    .we-category-chips-bar::-webkit-scrollbar { display: none; }
+    .we-chip-btn {
+      flex: 1;
+      padding: 6px 4px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 6px;
+      color: var(--we-text2);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .we-chip-btn i { font-size: 11px; }
+    .we-chip-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--we-text);
+      border-color: rgba(208, 170, 88, 0.2);
+    }
+    .we-chip-btn.is-active {
+      background: var(--we-surface);
+      color: var(--we-gold);
+      border-color: var(--we-gold);
+      font-weight: 600;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
+
+    /* 3. 主内容视口 */
+    .we-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .we-panel-body::-webkit-scrollbar { width: 4px; }
+    .we-panel-body::-webkit-scrollbar-thumb {
+      background: rgba(208, 170, 88, 0.28);
+      border-radius: 4px;
+    }
+
+    /* 紧凑版世界核心仪表盘卡片 (Compact World Core) */
+    .we-compact-core {
+      background: radial-gradient(120% 90% at 50% 0%, rgba(88,184,169,0.08), var(--we-card) 65%);
+      border: 1px solid var(--we-card-border);
+      border-radius: var(--we-radius);
+      padding: 12px 14px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    }
+    .we-core-ring-wrapper {
+      position: relative;
+      width: 128px;
+      height: 128px;
+    }
+    .we-core-center-info {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      text-align: center;
+    }
+    .core-title {
+      font-size: 12px;
+      color: var(--we-text3);
+      letter-spacing: 1px;
+    }
+    .core-pct {
+      font-size: 30px;
+      font-family: "Times New Roman", Times, Georgia, serif;
+      color: var(--we-accent);
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+    }
+    .core-pct span { font-size: 14px; margin-left: 2px; }
+    .core-tier {
+      font-size: 11px;
+      color: var(--we-accent);
+      background: rgba(88, 184, 169, 0.12);
+      padding: 1px 8px;
+      border-radius: 10px;
+      margin-top: 2px;
+    }
+    /* 核心统计指标小胶囊 */
+    .we-core-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      width: 100%;
+      border-top: 1px solid var(--we-hairline);
+      padding-top: 8px;
+      gap: 4px;
+    }
+    .stat-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: var(--we-text3);
+    }
+    .stat-num {
+      font-size: 16px;
+      font-family: "Times New Roman", Times, Georgia, serif;
+      color: var(--we-text);
+      font-weight: 500;
+    }
+
+    /* 剧情卡片与板块 */
+    .content-card {
+      background: var(--we-card);
+      border: 1px solid var(--we-card-border);
+      border-radius: var(--we-radius);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--we-gold);
+      border-bottom: 1px solid var(--we-hairline);
+      padding-bottom: 6px;
+    }
+    .card-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(208, 170, 88, 0.12);
+      color: var(--we-gold);
+    }
+    .item-row {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+      border-left: 3px solid var(--we-accent);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .item-title {
+      font-weight: 600;
+      color: var(--we-text);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .item-sub {
+      color: var(--we-text2);
+      font-size: 11px;
+    }
+
+    /* 4. 底部常驻推演操作栏 (Quick Action Bar) —— 免去去悬浮球猜图标 */
+    .we-quick-action-bar {
+      padding: 9px 12px;
+      background: rgba(19, 35, 44, 0.95);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--we-border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+    }
+    .act-btn-main {
+      flex: 2;
+      padding: 8px 10px;
+      background: linear-gradient(135deg, var(--we-accent), #368f81);
+      color: #ffffff;
+      border: none;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 2px 8px var(--we-accent-glow);
+      transition: all 0.15s;
+    }
+    .act-btn-main:active { transform: scale(0.98); }
+    .act-btn-sub {
+      flex: 1.5;
+      padding: 8px 8px;
+      background: var(--we-surface);
+      color: var(--we-text);
+      border: 1px solid var(--we-card-border);
+      border-radius: 7px;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .act-btn-sub:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--we-gold);
+    }
+    .act-inject-switch {
+      flex: 1.2;
+      padding: 7px 6px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--we-hairline);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .act-inject-switch.is-on {
+      border-color: var(--we-accent);
+      color: var(--we-accent);
+      background: rgba(88, 184, 169, 0.1);
+    }
+
+    /* 右侧对比说明 */
+    .design-notes {
+      flex: 1;
+      min-width: 320px;
+      max-width: 480px;
+      background: var(--we-card);
+      border: 1px solid var(--we-card-border);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.4);
+    }
+    .note-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      background: rgba(208, 170, 88, 0.15);
+      border: 1px solid var(--we-gold);
+      color: var(--we-gold);
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      width: fit-content;
+    }
+    .note-h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--we-text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .note-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--we-text2);
+    }
+    .note-item {
+      padding: 10px 12px;
+      background: var(--we-surface);
+      border-radius: 8px;
+      border-left: 3px solid var(--we-accent);
+    }
+    .note-item strong {
+      color: var(--we-text);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    /* Toast 提示 */
+    .toast-box {
+      position: absolute;
+      top: 55px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--we-card);
+      border: 1px solid var(--we-gold);
+      color: var(--we-gold);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+      z-index: 1000;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 控制栏 -->
+  <div class="demo-bar">
+    <div class="demo-title">
+      <i class="fa-solid fa-gamepad"></i>
+      <span>世界引擎主界面 & 快捷栏交互原型 (Phase 3 & 4)</span>
+    </div>
+    <div class="demo-controls">
+      <span style="font-size:12px;color:var(--we-text3);">切换配色：</span>
+      <button class="demo-btn active" onclick="setTheme('default', this)">墨玉 (默认)</button>
+      <button class="demo-btn" onclick="setTheme('night', this)">夜幕 (深黑)</button>
+      <button class="demo-btn" onclick="setTheme('paper', this)">纸白 (明亮)</button>
+    </div>
+  </div>
+
+  <div class="preview-container">
+
+    <!-- 真实面板容器模拟 -->
+    <div class="we-panel-mockup">
+
+      <div class="toast-box" id="toast-el">已发送单步推演指令</div>
+
+      <!-- 1. 顶部 Header (Phase 2 已实现) -->
+      <div class="we-panel-header">
+        <div class="we-header-main-row">
+          <div class="we-segmented-switch">
+            <button class="we-segmented-tab is-active" id="btn-engine-world" onclick="switchEngine('world')">
+              <i class="fa-solid fa-earth-americas"></i> 世界引擎
+            </button>
+            <button class="we-segmented-tab" id="btn-engine-memory" onclick="switchEngine('memory')">
+              <i class="fa-solid fa-brain"></i> 记忆引擎
+            </button>
+          </div>
+          <div class="we-panel-corner-actions">
+            <button class="we-corner-btn" title="打开设置" onclick="showToast('模拟：打开新版设置面板')"><i class="fa-solid fa-gear"></i></button>
+            <button class="we-corner-btn" title="关闭面板" onclick="showToast('模拟：关闭面板')">✕</button>
+          </div>
+        </div>
+
+        <!-- 状态胶囊 -->
+        <div class="we-header-status-pill">
+          <div class="status-left">
+            <span class="status-dot"></span>
+            <span id="pill-mood" style="color:var(--we-accent);font-weight:600;">泰平 (92.5%)</span>
+            <span style="color:var(--we-hairline);">|</span>
+            <span id="pill-round" style="color:var(--we-gold);">第 42 轮 · 28 层</span>
+          </div>
+          <div class="status-right">
+            <span id="pill-time">承平七年·夏</span>
+            <span style="opacity:0.7;">v3.3.4</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 二级分类胶囊栏 (Category Chips) —— 解决反复点返回的痛点 -->
+      <div class="we-category-chips-bar" id="chips-bar">
+        <!-- 世界引擎 Chips -->
+        <button class="we-chip-btn is-active" onclick="switchView('overview', this)">
+          <i class="fa-solid fa-house"></i> <span>总览</span>
+        </button>
+        <button class="we-chip-btn" onclick="switchView('situation', this)">
+          <i class="fa-solid fa-chess"></i> <span>局势</span>
+        </button>
+        <button class="we-chip-btn" onclick="switchView('events', this)">
+          <i class="fa-solid fa-scroll"></i> <span>事件</span>
+        </button>
+        <button class="we-chip-btn" onclick="switchView('relations', this)">
+          <i class="fa-solid fa-users"></i> <span>关系</span>
+        </button>
+        <button class="we-chip-btn" onclick="switchView('resources', this)">
+          <i class="fa-solid fa-coins"></i> <span>资源</span>
+        </button>
+      </div>
+
+      <!-- 3. 面板内容区 (实时切换不同模块，绝不强制返回) -->
+      <div class="we-panel-body" id="main-view-body">
+
+        <!-- ===== VIEW: 总览概况 (带缩减高度的世界核心仪表盘) ===== -->
+        <div class="view-panel" id="view-overview">
+          
+          <!-- 微型核心仪表盘卡片 -->
+          <div class="we-compact-core">
+            <div class="we-core-ring-wrapper">
+              <svg viewBox="0 0 160 160" width="128" height="128">
+                <!-- 背景圆环 -->
+                <circle cx="80" cy="80" r="62" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"/>
+                <!-- 进度圆环 -->
+                <circle cx="80" cy="80" r="62" fill="none" stroke="var(--we-accent)" stroke-width="7"
+                  stroke-linecap="round" stroke-dasharray="360 400" transform="rotate(-90 80 80)"/>
+                <!-- 轨道发光点 -->
+                <circle cx="138" cy="80" r="4" fill="#ffffff" filter="drop-shadow(0 0 6px var(--we-accent))"/>
+              </svg>
+              <div class="we-core-center-info">
+                <div class="core-title">稳定度</div>
+                <div class="core-pct">92.5<span>%</span></div>
+                <div class="core-tier">泰平盛景</div>
+              </div>
+            </div>
+
+            <!-- 4 大核心关键指标 -->
+            <div class="we-core-stats-grid">
+              <div class="stat-box">
+                <span class="stat-label">大势</span>
+                <span class="stat-num" style="color:var(--we-gold);">3</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-label">事件链</span>
+                <span class="stat-num" style="color:var(--we-accent);">5</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-label">势力</span>
+                <span class="stat-num" style="color:#aa8bc9;">4</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-label">仇敌</span>
+                <span class="stat-num" style="color:var(--we-danger);">2</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 世界摘要卡片 -->
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-compass"></i> 世界大局简报</span>
+              <span class="card-badge">第 42 轮摘要</span>
+            </div>
+            <div style="font-size:12px;color:var(--we-text2);line-height:1.6;">
+              北境镇国将军府兵变平息，关外游骑暂时收敛；东南私盐商道被密探查获，牵扯出户部三位要员；主角声望在京师江湖日渐隆盛，但已暗中引起幽冥阁刺客堂注意。
+            </div>
+          </div>
+
+          <!-- 快速直达卡片 -->
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-bolt"></i> 最新紧要动态</span>
+              <span class="card-badge" style="color:var(--we-danger);background:rgba(214,111,104,0.12);">紧急</span>
+            </div>
+            <div class="item-row">
+              <div class="item-title">
+                <span>[Lv.3 事件] 东南盐运大劫案</span>
+                <span style="font-size:10px;color:var(--we-accent);">推进中 (80%)</span>
+              </div>
+              <div class="item-sub">六扇门金牌捕头已封锁官道，幕后黑手即将浮出水面。</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ===== VIEW: 天下局势 ===== -->
+        <div class="view-panel" id="view-situation" style="display:none;">
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-flag"></i> 天下大势</span>
+              <span class="card-badge">宏观走向</span>
+            </div>
+            <div class="item-row">
+              <div class="item-title">朝野新旧党争激化</div>
+              <div class="item-sub">文臣集团主张议和，九边边防军主张主动出击，京师暗流涌动。</div>
+            </div>
+            <div class="item-row">
+              <div class="item-title">江南水患与赈灾粮荒</div>
+              <div class="item-sub">连续暴雨致使大运河决堤，灾民已有流民结寨自保倾向。</div>
+            </div>
+          </div>
+
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-map-location-dot"></i> 区域突发事件</span>
+              <span class="card-badge">局部危机</span>
+            </div>
+            <div class="item-row" style="border-left-color:var(--we-danger);">
+              <div class="item-title">黑市暗街发生流血火拼</div>
+              <div class="item-sub">神偷门与斧头帮争夺地下暗渠控制权，官府禁军已介入宵禁。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== VIEW: 动态事件 ===== -->
+        <div class="view-panel" id="view-events" style="display:none;">
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-link"></i> 正在发展的事件链</span>
+              <span class="card-badge">因果推演</span>
+            </div>
+            <div class="item-row">
+              <div class="item-title">
+                <span>1. 遗失前朝密诏</span>
+                <span style="color:var(--we-gold);">阶段: 追踪</span>
+              </div>
+              <div class="item-sub">密诏线索指向城西当铺，掌柜已在昨夜暴毙。</div>
+            </div>
+            <div class="item-row">
+              <div class="item-title">
+                <span>2. 刺客堂悬赏令</span>
+                <span style="color:var(--we-danger);">阶段: 潜行伏击</span>
+              </div>
+              <div class="item-sub">三名二流刺客正在城中客栈排查主角行踪。</div>
+            </div>
+          </div>
+
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-wind"></i> 街巷风声谣传</span>
+              <span class="card-badge">风声衰减中</span>
+            </div>
+            <div class="item-row" style="border-left-color:var(--we-text3);">
+              <div class="item-title">传言皇陵夜有龙吟异响</div>
+              <div class="item-sub">民间流传天命将转，存活轮数剩余 2 轮。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== VIEW: 关系势力 ===== -->
+        <div class="view-panel" id="view-relations" style="display:none;">
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-shield-halved"></i> 盘踞势力</span>
+              <span class="card-badge">4 方活跃</span>
+            </div>
+            <div class="item-row">
+              <div class="item-title">
+                <span>天机阁 (情报组织)</span>
+                <span style="color:var(--we-success);">态度: 友善 (+45)</span>
+              </div>
+              <div class="item-sub">已向主角开放丁级以上隐秘情报折价购买。</div>
+            </div>
+            <div class="item-row" style="border-left-color:var(--we-danger);">
+              <div class="item-title">
+                <span>幽冥殿 (暗杀宗门)</span>
+                <span style="color:var(--we-danger);">态度: 死仇 (-85)</span>
+              </div>
+              <div class="item-sub">执事长老已下达格杀勿论令。</div>
+            </div>
+          </div>
+
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-skull"></i> 仇敌录</span>
+              <span class="card-badge">2 人在册</span>
+            </div>
+            <div class="item-row" style="border-left-color:var(--we-danger);">
+              <div class="item-title">冷面判官 · 楚离</div>
+              <div class="item-sub">因主角救走前朝旧臣，誓要取主角首级。当前位置: 沧州驿站。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== VIEW: 资源经济 ===== -->
+        <div class="view-panel" id="view-resources" style="display:none;">
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-coins"></i> 经济与民生波动</span>
+              <span class="card-badge">银价平稳</span>
+            </div>
+            <div class="item-row">
+              <div class="item-title">粮价上浮三成</div>
+              <div class="item-sub">因水患影响，各地商贾开始惜售屯粮。</div>
+            </div>
+          </div>
+          <div class="content-card">
+            <div class="card-head">
+              <span><i class="fa-solid fa-mask"></i> 秘密黑盒</span>
+              <span class="card-badge">未公开因果</span>
+            </div>
+            <div class="item-row" style="border-left-color:#aa8bc9;">
+              <div class="item-title">主角贴身玉佩的来历 (锁定)</div>
+              <div class="item-sub">涉及二十年前皇室内乱，知情者仅剩皇宫总管太监。</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 4. 底部常驻推演操作栏 (Quick Action Bar) —— Phase 4 核心革新 -->
+      <div class="we-quick-action-bar">
+        <button class="act-btn-main" id="btn-quick-step" onclick="handleQuickAction('forward')">
+          <i class="fa-solid fa-forward"></i>
+          <span>立即单步推演</span>
+        </button>
+        <button class="act-btn-sub" id="btn-quick-redo" onclick="handleQuickAction('redo')">
+          <i class="fa-solid fa-rotate-right"></i>
+          <span>重演当前轮</span>
+        </button>
+        <div class="act-inject-switch is-on" id="btn-quick-inject" onclick="toggleQuickInject(this)">
+          <i class="fa-solid fa-syringe"></i>
+          <span>注入: 开</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 右侧：设计思想与改动对比清单 -->
+    <div class="design-notes">
+      <span class="note-badge">Phase 3 & Phase 4 核心设计说明</span>
+      <h2 class="note-h2"><i class="fa-solid fa-layer-group"></i> 告别“进进出出”，随时平级切换</h2>
+
+      <div class="note-list">
+        <div class="note-item">
+          <strong>1. 常驻二级分类胶囊栏 (Category Chips)</strong>
+          原本在主界面看“事件”或“仇敌”，必须“点进子页 ➜ 看完点返回 ➜ 再点另一项”，非常繁琐。<br>
+          现在上方常驻 `[ 总览 ]` `[ 局势 ]` `[ 事件 ]` `[ 关系 ]` `[ 资源 ]`，在任何界面直接横向一键点击切换，零等待、零多余返回！
+        </div>
+
+        <div class="note-item">
+          <strong>2. 核心圆环瘦身微缩 (节省 35% 垂直空间)</strong>
+          原本 160px+ 高度的巨型圆环把内容全部顶到屏幕下方。新设计将圆环缩减至精致仪表盘尺度，稳定度百分比和核心统计一目了然，腾出大幅空间直接阅读剧情。
+        </div>
+
+        <div class="note-item">
+          <strong>3. 底部常驻推演操作条 (Quick Action Bar)</strong>
+          彻底解决用户“找半天推演按钮在哪里”的问题：无需在小球外圈猜测无文字的卫星图标，只要面板打开，底部常驻 `[ ▶ 立即单步推演 ]`、`[ 🔄 重演当前轮 ]`、`[ ⚡ 注入开/关 ]`。
+        </div>
+
+        <div class="note-item">
+          <strong>4. 双引擎自适应对齐</strong>
+          切换到「记忆引擎」时，胶囊栏自动切换为 `[ 脉络 ]` `[ 人物 ]` `[ 实体 ]` `[ 纪要 ]` `[ 总述 ]`，底部动作也相应切换为提取记忆与生成总述，体验完全统一。
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // 切换配色
+    function setTheme(name, btn) {
+      document.querySelectorAll('.demo-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (name === 'default') document.body.removeAttribute('data-theme');
+      else document.body.setAttribute('data-theme', name);
+    }
+
+    // 切换引擎
+    let currentEngine = 'world';
+    function switchEngine(type) {
+      currentEngine = type;
+      document.getElementById('btn-engine-world').classList.toggle('is-active', type === 'world');
+      document.getElementById('btn-engine-memory').classList.toggle('is-active', type === 'memory');
+
+      const chipsBar = document.getElementById('chips-bar');
+      const actMain = document.getElementById('btn-quick-step');
+      const actSub = document.getElementById('btn-quick-redo');
+      const pillMood = document.getElementById('pill-mood');
+
+      if (type === 'world') {
+        pillMood.textContent = '泰平 (92.5%)';
+        actMain.innerHTML = '<i class="fa-solid fa-forward"></i><span>立即单步推演</span>';
+        actSub.innerHTML = '<i class="fa-solid fa-rotate-right"></i><span>重演当前轮</span>';
+        chipsBar.innerHTML = `
+          <button class="we-chip-btn is-active" onclick="switchView('overview', this)"><i class="fa-solid fa-house"></i> <span>总览</span></button>
+          <button class="we-chip-btn" onclick="switchView('situation', this)"><i class="fa-solid fa-chess"></i> <span>局势</span></button>
+          <button class="we-chip-btn" onclick="switchView('events', this)"><i class="fa-solid fa-scroll"></i> <span>事件</span></button>
+          <button class="we-chip-btn" onclick="switchView('relations', this)"><i class="fa-solid fa-users"></i> <span>关系</span></button>
+          <button class="we-chip-btn" onclick="switchView('resources', this)"><i class="fa-solid fa-coins"></i> <span>资源</span></button>
+        `;
+        switchView('overview', chipsBar.children[0]);
+      } else {
+        pillMood.textContent = '记忆就绪 · 下次总述差 3 轮';
+        actMain.innerHTML = '<i class="fa-solid fa-brain"></i><span>提取本轮记忆</span>';
+        actSub.innerHTML = '<i class="fa-solid fa-book-open"></i><span>生成总述</span>';
+        chipsBar.innerHTML = `
+          <button class="we-chip-btn is-active" onclick="showToast('展示：记忆脉络总览')"><i class="fa-solid fa-house"></i> <span>脉络</span></button>
+          <button class="we-chip-btn" onclick="showToast('展示：人物记忆列表')"><i class="fa-solid fa-user"></i> <span>人物</span></button>
+          <button class="we-chip-btn" onclick="showToast('展示：实体记忆分类')"><i class="fa-solid fa-cubes"></i> <span>实体</span></button>
+          <button class="we-chip-btn" onclick="showToast('展示：剧情小纪要')"><i class="fa-solid fa-book-bookmark"></i> <span>纪要</span></button>
+          <button class="we-chip-btn" onclick="showToast('展示：宏观总述长文')"><i class="fa-solid fa-book-open"></i> <span>总述</span></button>
+        `;
+      }
+      showToast('已切换至：' + (type === 'world' ? '世界引擎' : '记忆引擎'));
+    }
+
+    // 切换视口 (平级切换，告别返回按钮)
+    function switchView(viewKey, btn) {
+      document.querySelectorAll('.we-chip-btn').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+
+      document.querySelectorAll('.view-panel').forEach(p => p.style.display = 'none');
+      const target = document.getElementById('view-' + viewKey);
+      if (target) target.style.display = 'flex';
+      target.style.flexDirection = 'column';
+      target.style.gap = '12px';
+    }
+
+    // 底部快捷动作模拟
+    function handleQuickAction(type) {
+      if (type === 'forward') {
+        showToast(currentEngine === 'world' ? '已触发：世界单步推演' : '已触发：提取本轮记忆');
+      } else if (type === 'redo') {
+        showToast(currentEngine === 'world' ? '已触发：回退重演当前轮' : '已触发：生成总述');
+      }
+    }
+
+    // 底部注入开关切换
+    function toggleQuickInject(el) {
+      const isOn = el.classList.toggle('is-on');
+      el.querySelector('span').textContent = '注入: ' + (isOn ? '开' : '关');
+      showToast('正文状态注入已' + (isOn ? '开启' : '关闭'));
+    }
+
+    // Toast 显示
+    let toastTimer;
+    function showToast(msg) {
+      const el = document.getElementById('toast-el');
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.style.display = 'none'; }, 1800);
+    }
+  </script>
+</body>
+</html>

@@ -324,25 +324,56 @@ window.WORLD_ENGINE_UI = (function() {
     panel.id = 'we-panel';
     panel.innerHTML = `
       <div class="we-panel-header">
+        <div class="we-header-main-row">
+          <div class="we-segmented-switch" role="tablist" aria-label="引擎切换">
+            <button class="we-segmented-tab we-engine-tab-world is-active" data-target-face="world" type="button" role="tab" title="切换到世界引擎">
+              <i class="fa-solid fa-earth-americas"></i> 世界引擎
+            </button>
+            <button class="we-segmented-tab we-engine-tab-memory" data-target-face="memory" type="button" role="tab" title="切换到记忆引擎">
+              <i class="fa-solid fa-brain"></i> 记忆引擎
+            </button>
+          </div>
+          <div class="we-panel-corner-actions">
+            <button class="we-panel-settings" id="we-btn-settings-open" title="设置" type="button"><i class="fa-solid fa-gear"></i></button>
+            <button class="we-panel-close" title="关闭面板" type="button">✕</button>
+          </div>
+        </div>
+        <div class="we-header-status-pill">
+          <div class="we-header-status-left">
+            <div class="we-header-mood" id="we-header-mood">
+              <span class="we-header-dot"></span>
+              <span class="we-header-mood-text"></span>
+            </div>
+            <span class="we-header-round" id="we-header-round"></span>
+          </div>
+          <div class="we-header-status-right">
+            <span class="we-header-story-time" id="we-header-story-time"></span>
+            <span class="we-panel-version" id="we-panel-version"></span>
+          </div>
+        </div>
+        <div style="display:none;" aria-hidden="true">
         <div class="we-header-info">
           <div class="we-header-top">
             <button class="we-panel-title we-engine-face-toggle" type="button" title="切换到记忆引擎" aria-label="切换到记忆引擎">世界引擎</button>
-            <span class="we-panel-version" id="we-panel-version"></span><!-- [FIX] 版本号 -->
-            <span class="we-header-round" id="we-header-round"></span>
-            <span class="we-header-story-time" id="we-header-story-time"></span>
+            <span class="we-panel-version" id="we-panel-version-old"></span><!-- [FIX] 版本号 -->
+            <span class="we-header-round" id="we-header-round-old"></span>
+            <span class="we-header-story-time" id="we-header-story-time-old"></span>
           </div>
-          <div class="we-header-mood" id="we-header-mood">
+          <div class="we-header-mood" id="we-header-mood-old">
             <span class="we-header-dot"></span>
             <span class="we-header-mood-text"></span>
           </div>
         </div>
         <div class="we-panel-corner-actions">
           <button class="we-panel-close">✕</button>
-          <button class="we-panel-settings" id="we-btn-settings-open" title="设置"><i class="fa-solid fa-gear"></i></button>
+          <button class="we-panel-settings" id="we-btn-settings-open-old" title="设置"><i class="fa-solid fa-gear"></i></button></div><!-- close display:none -->
         </div>
       </div>
+      <div class="we-category-chips-bar" id="we-category-chips-bar"></div>
       <div class="we-panel-body" id="we-panel-body">
         <div class="we-loading">加载中...</div>
+      </div>
+      <div class="we-quick-action-bar" id="we-quick-action-bar">
       </div>
     `;
     document.body.appendChild(panel);
@@ -357,7 +388,16 @@ window.WORLD_ENGINE_UI = (function() {
       else verEl.style.display = 'none';
     }
 
-    panel.querySelector('.we-panel-close').onclick = () => hidePanel();
+    panel.querySelectorAll('.we-panel-close').forEach(btn => {
+      btn.onclick = () => hidePanel();
+    });
+    panel.querySelectorAll('.we-segmented-tab').forEach(btn => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        const faceId = btn.dataset.targetFace;
+        if (faceId) switchEngineFace(faceId);
+      };
+    });
     panel.querySelector('.we-engine-face-toggle').onclick = (event) => {
       event.stopPropagation();
       advanceEngineFace();
@@ -952,9 +992,13 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   const MEMORY_SETTINGS_TABS = [
-    { key: 'common', label: '常用' },
-    { key: 'link', label: '联动' },
-    { key: 'advanced', label: '高级' },
+    { key: 'conn',      label: '连接模型', icon: 'fa-plug' },
+    { key: 'evolve',    label: '推演注入', icon: 'fa-bolt' },
+    { key: 'mechanics', label: '本地机制', icon: 'fa-dice' },
+    { key: 'archive',   label: '存档系统', icon: 'fa-box-archive' }
+  ];
+  const _LEGACY_MEMORY_TABS = [
+
     { key: 'mechanics', label: '本地机制' },
     { key: 'archive', label: '存档' },
     { key: 'worldbook', label: '世界书' },
@@ -1505,7 +1549,25 @@ window.WORLD_ENGINE_UI = (function() {
       .replace(/后台推演世界书/g, '记忆推演世界书')
       .replace(/注入推演/g, '注入记忆推演');
     const panelContent = {
-      common: sec('set-memory-api', '记忆引擎 API', apiBody)
+      conn: sec('set-memory-api', '记忆引擎 API', apiBody)
+        + sec('set-memory-retry', 'API 自动重试', retryBody),
+      evolve: sec('set-memory-evolve', '记忆提取与事件整理', modeBody)
+        + sec('set-memory-inject', '记忆信息注入', injectBody)
+        + sec('set-memory-link', '向世界引擎联动', linkBody)
+        + sec('set-memory-tone', '附加提示词', toneBody),
+      mechanics: sec('set-memory-mechanics', '正文保留与推演参考', mechanicsBody)
+        + sec('set-memory-blacklist', '人物与实体黑名单', blacklistBody),
+      archive: sec('set-memory-archive', '记忆缓存与存档', archiveBody)
+        + renderMemoryCheckpointSection()
+        + sec('set-memory-backfill', '批量重填记忆推演', backfillBody)
+        + sec('set-memory-worldbook-enabled', '世界书总开关', memoryWorldbookBody) + worldbook
+        + sec('set-memory-filter', '输入过滤器', filterBody)
+        + sec('set-memory-display', '界面显示', displayBody)
+        + sec('set-memory-data', '记忆数据导入/导出', dataBody)
+        + sec('set-memory-debug', '记忆推演调试', '<button class="we-btn" id="we-memory-export-diag" style="width:100%;margin-bottom:8px;">导出诊断包</button><div id="we-memory-debug-render">' + renderMemoryDebug() + '</div>')
+        + memoryAboutBody,
+    };
+    const _legacyMemoryPanelContent = { common: ''
         + sec('set-memory-evolve', '记忆提取与事件整理', modeBody)
         + sec('set-memory-inject', '记忆信息注入', injectBody),
       mechanics: sec('set-memory-mechanics', '正文保留与推演参考', mechanicsBody),
@@ -1524,25 +1586,27 @@ window.WORLD_ENGINE_UI = (function() {
       about: memoryAboutBody
     };
 
-    if (!MEMORY_SETTINGS_TABS.some(tab => tab.key === _memorySettingsTab)) _memorySettingsTab = 'common';
+    if (!MEMORY_SETTINGS_TABS.some(tab => tab.key === _memorySettingsTab)) _memorySettingsTab = 'conn';
     const tabBar = '<div class="we-settings-tabs-shell">'
-      + '<button class="we-settings-tab-scroll" data-dir="-1" title="向左滚动"><i class="fa-solid fa-chevron-left"></i></button>'
+      + '<button class="we-settings-tab-scroll" data-dir="-1" title="向左滚动" style="display:none;"><i class="fa-solid fa-chevron-left"></i></button>'
       + '<div class="we-settings-tabs" id="we-settings-tabs">'
       + MEMORY_SETTINGS_TABS.map(tab =>
           '<button class="we-settings-tab' + (tab.key === _memorySettingsTab ? ' we-settings-tab--active' : '')
-          + '" data-tab="' + tab.key + '">' + tab.label + '</button>').join('')
+          + '" data-tab="' + tab.key + '">' + (tab.icon ? '<i class="fa-solid ' + tab.icon + '"></i> ' : '') + tab.label + '</button>').join('')
       + '</div>'
-      + '<button class="we-settings-tab-scroll" data-dir="1" title="向右滚动"><i class="fa-solid fa-chevron-right"></i></button>'
+      + '<button class="we-settings-tab-scroll" data-dir="1" title="向右滚动" style="display:none;"><i class="fa-solid fa-chevron-right"></i></button>'
       + '</div>';
     const panels = MEMORY_SETTINGS_TABS.map(tab =>
       '<div class="we-settings-panel" data-tab="' + tab.key + '"'
       + (tab.key === _memorySettingsTab ? '' : ' style="display:none;"') + '>'
       + (panelContent[tab.key] || '') + '</div>').join('');
 
+    const memorySearchBar = '<div class="we-settings-search-shell"><div class="we-settings-search-box"><i class="fa-solid fa-magnifying-glass we-settings-search-icon"></i><input type="text" class="we-settings-search-input" id="we-memory-settings-search" placeholder="快速过滤设置项 (API、重填、黑名单、注入...)" autocomplete="off"><button type="button" class="we-settings-search-clear" id="we-memory-settings-search-clear" title="清空搜索" style="display:none;">✕</button></div></div>';
     return '<div class="we-sub-topbar"><button class="we-icon-btn" id="we-memory-settings-back" type="button" title="返回"><i class="fa-solid fa-arrow-left"></i></button><span class="we-sub-title">设置</span></div>'
+      + memorySearchBar
       + tabBar + panels
       + '<div class="we-settings-save-actions we-settings-save-sticky">'
-      + '<button class="we-btn" id="we-save-memory-settings">保存设置</button>'
+      + '<button class="we-btn we-btn-primary" id="we-save-memory-settings"><i class="fa-solid fa-check"></i> 保存全部设置</button>'
       + '</div>';
   }
 
@@ -1560,6 +1624,10 @@ window.WORLD_ENGINE_UI = (function() {
       title.title = '切换到下一界面：' + next.label;
       title.setAttribute('aria-label', title.title);
     }
+    const worldTab = panelElement.querySelector('.we-engine-tab-world');
+    const memoryTab = panelElement.querySelector('.we-engine-tab-memory');
+    if (worldTab) worldTab.classList.toggle('is-active', face.id === 'world');
+    if (memoryTab) memoryTab.classList.toggle('is-active', face.id === 'memory');
     const settings = panelElement.querySelector('#we-btn-settings-open');
     if (settings) {
       settings.classList.toggle('is-active', Boolean(callEngineFace(face, 'isSettingsOpen', false)));
@@ -1572,6 +1640,155 @@ window.WORLD_ENGINE_UI = (function() {
       version.style.display = value ? '' : 'none';
     }
     syncBallFace();
+    updateDashboardChrome();
+  }
+
+  const WORLD_CHIPS = [
+    { id: 'home', icon: 'fa-house', label: '总览' },
+    { id: 'situation', icon: 'fa-chess', label: '局势' },
+    { id: 'events', icon: 'fa-scroll', label: '事件' },
+    { id: 'relations', icon: 'fa-users', label: '关系' },
+    { id: 'resources', icon: 'fa-coins', label: '资源' }
+  ];
+
+  const MEMORY_CHIPS = [
+    { id: 'home', icon: 'fa-house', label: '脉络' },
+    { id: 'people', icon: 'fa-user', label: '人物' },
+    { id: 'entities', icon: 'fa-landmark', label: '实体' },
+    { id: 'minutes', icon: 'fa-file-lines', label: '纪要' },
+    { id: 'overview', icon: 'fa-book-open', label: '总述' }
+  ];
+
+  function updateDashboardChrome() {
+    if (!panelElement) return;
+    const chipsBar = panelElement.querySelector('#we-category-chips-bar');
+    const actionBar = panelElement.querySelector('#we-quick-action-bar');
+    if (!chipsBar || !actionBar) return;
+
+    const face = getEngineFace();
+    const isWorld = face.id === 'world';
+    const settingsOpen = isWorld
+      ? _currentView === 'settings'
+      : Boolean(callEngineFace(face, 'isSettingsOpen', false));
+
+    if (settingsOpen) {
+      chipsBar.style.display = 'none';
+      actionBar.style.display = 'none';
+      return;
+    }
+
+    chipsBar.style.display = 'flex';
+    actionBar.style.display = 'flex';
+
+    // 1. 分类胶囊栏 (Phase 3)
+    const chips = isWorld ? WORLD_CHIPS : MEMORY_CHIPS;
+    const activeView = isWorld ? _currentView : _memoryView;
+
+    chipsBar.innerHTML = chips.map(c => `
+      <button class="we-chip-btn ${c.id === activeView ? 'is-active' : ''}" data-view="${c.id}" type="button">
+        <i class="fa-solid ${c.icon}"></i> ${c.label}
+      </button>
+    `).join('');
+
+    chipsBar.querySelectorAll('.we-chip-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const targetView = btn.dataset.view;
+        if (isWorld) {
+          if (_currentView !== targetView) {
+            _currentView = targetView;
+            _selectedNavView = targetView === 'home' ? null : targetView;
+            refresh();
+          }
+        } else {
+          if (_memoryView !== targetView) {
+            clearMemoryEditing();
+            _memoryView = targetView;
+            _memorySelectedNavView = targetView === 'home' ? null : targetView;
+            refresh();
+          }
+        }
+      };
+    });
+
+    // 2. 底部快捷操作栏 (Phase 4)
+    const isRunning = Boolean(callEngineFace(face, 'isRunning', false));
+    if (isWorld) {
+      const worldSettings = window.WORLD_ENGINE_API?.getSettings?.(true) || {};
+      const injectOn = worldSettings.injectIntoPrompt !== false;
+      const mainBtnHtml = isRunning
+        ? `<button class="act-btn-main act-btn-abort" id="we-quick-btn-abort" type="button" title="停止推演"><i class="fa-solid fa-stop"></i> 停止推演</button>`
+        : `<button class="act-btn-main" id="we-quick-btn-forward" type="button" title="执行手动单步推演"><i class="fa-solid fa-play"></i> 立即推演</button>`;
+
+      actionBar.innerHTML = `
+        ${mainBtnHtml}
+        <button class="act-btn-sub" id="we-quick-btn-redo" type="button" title="重演当前轮次"><i class="fa-solid fa-rotate-right"></i> 重演当前轮</button>
+        <button class="act-inject-switch ${injectOn ? 'is-on' : ''}" id="we-quick-btn-inject" type="button" title="点击切换世界提示词注入状态"><i class="fa-solid fa-bolt"></i> ${injectOn ? '注入已开' : '注入已关'}</button>
+      `;
+
+      const forwardBtn = actionBar.querySelector('#we-quick-btn-forward');
+      if (forwardBtn) forwardBtn.onclick = () => callEngineFaceAction(face, 'forward');
+      const abortBtn = actionBar.querySelector('#we-quick-btn-abort');
+      if (abortBtn) abortBtn.onclick = () => callEngineFaceAction(face, 'abort');
+      const redoBtn = actionBar.querySelector('#we-quick-btn-redo');
+      if (redoBtn) redoBtn.onclick = () => callEngineFaceAction(face, 'redo');
+      const injectBtn = actionBar.querySelector('#we-quick-btn-inject');
+      if (injectBtn) {
+        injectBtn.onclick = () => {
+          const api = window.WORLD_ENGINE_API;
+          const current = api?.getSettings?.(true) || {};
+          const nextVal = current.injectIntoPrompt === false;
+          window.WORLD_ENGINE_STORE?.setItem('world_engine_settings', JSON.stringify({ ...current, injectIntoPrompt: nextVal }));
+          api?.getSettings?.(true);
+          window.WORLD_ENGINE?.applyInjection?.();
+          showToast(nextVal ? '世界引擎：提示词注入已开启' : '世界引擎：提示词注入已关闭');
+          refresh();
+        };
+      }
+    } else {
+      const memorySettings = window.MEMORY_ENGINE_SETTINGS?.getSettings?.(true) || {};
+      const injectOn = memorySettings.injectIntoPrompt !== false;
+      const mainBtnHtml = isRunning
+        ? `<button class="act-btn-main act-btn-abort" id="we-quick-btn-abort" type="button" title="停止记忆任务"><i class="fa-solid fa-stop"></i> 停止任务</button>`
+        : `<button class="act-btn-main" id="we-quick-btn-memory-extract" type="button" title="从最新对话手动提取记忆"><i class="fa-solid fa-brain"></i> 提取记忆</button>`;
+
+      actionBar.innerHTML = `
+        ${mainBtnHtml}
+        <button class="act-btn-sub" id="we-quick-btn-memory-overview" type="button" title="手动执行阶段性总述归并"><i class="fa-solid fa-book-open"></i> 生成总述</button>
+        <button class="act-inject-switch ${injectOn ? 'is-on' : ''}" id="we-quick-btn-inject" type="button" title="点击切换记忆提示词注入状态"><i class="fa-solid fa-bolt"></i> ${injectOn ? '注入已开' : '注入已关'}</button>
+      `;
+
+      const extractBtn = actionBar.querySelector('#we-quick-btn-memory-extract');
+      if (extractBtn) extractBtn.onclick = () => callEngineFaceAction(face, 'forward');
+      const abortBtn = actionBar.querySelector('#we-quick-btn-abort');
+      if (abortBtn) abortBtn.onclick = () => callEngineFaceAction(face, 'abort');
+      const overviewBtn = actionBar.querySelector('#we-quick-btn-memory-overview');
+      if (overviewBtn) {
+        overviewBtn.onclick = async () => {
+          overviewBtn.disabled = true;
+          try {
+            showToast('正在生成记忆总述...');
+            await window.MEMORY_ENGINE?.manualBigSummary?.();
+          } catch(e) {
+            console.error(e);
+          } finally {
+            overviewBtn.disabled = false;
+            refresh();
+          }
+        };
+      }
+      const injectBtn = actionBar.querySelector('#we-quick-btn-inject');
+      if (injectBtn) {
+        injectBtn.onclick = () => {
+          const current = window.MEMORY_ENGINE_SETTINGS?.getSettings?.(true) || {};
+          const nextVal = current.injectIntoPrompt === false;
+          window.MEMORY_ENGINE_SETTINGS?.patchSettings?.({ injectIntoPrompt: nextVal });
+          window.MEMORY_ENGINE?.applyInjection?.();
+          showToast(nextVal ? '记忆引擎：提示词注入已开启' : '记忆引擎：提示词注入已关闭');
+          refresh();
+        };
+      }
+    }
   }
 
   function advanceEngineFace() {
@@ -1588,6 +1805,7 @@ window.WORLD_ENGINE_UI = (function() {
       _engineFace = target.id;
       applyEngineFaceTheme();
       syncBallFace();
+    updateDashboardChrome();
       panelElement.classList.remove('we-panel-flip-out');
       panelElement.classList.add('we-panel-flip-in');
       refresh();
@@ -2042,6 +2260,12 @@ window.WORLD_ENGINE_UI = (function() {
 
   // [FIX] 选项卡定义：label + 包含哪些片段。仅归类现有 section，不新增/不删功能。
   const SETTINGS_TABS = [
+    { key: 'conn',      label: '连接模型', icon: 'fa-plug' },
+    { key: 'evolve',    label: '推演注入', icon: 'fa-bolt' },
+    { key: 'mechanics', label: '本地机制', icon: 'fa-dice' },
+    { key: 'archive',   label: '存档系统', icon: 'fa-box-archive' }
+  ];
+  const _LEGACY_SETTINGS_TABS = [
     { key: 'common',    label: '常用' },
     { key: 'link',      label: '联动' },
     { key: 'advanced',  label: '高级' },
@@ -2051,8 +2275,8 @@ window.WORLD_ENGINE_UI = (function() {
     { key: 'debug',     label: '调试' },
     { key: 'about',     label: '关于' }
   ];
-  let _settingsTab = 'common';
-  let _memorySettingsTab = 'common';
+  let _settingsTab = 'conn';
+  let _memorySettingsTab = 'conn';
 
   function renderSettingsView(checkpoint, cpLayer) {
     const cpContent = checkpoint
@@ -2082,24 +2306,28 @@ window.WORLD_ENGINE_UI = (function() {
 
     // 各选项卡承载的片段（每个 section 恰好出现一次，零重复）
     const panelContent = {
-      common:    form.api + form.evolve + form.inject,
-      link:      form.link,
-      advanced:  form.retry + form.backfill + form.filter + form.display + extra.tone,
+      conn:      form.api + form.retry,
+      evolve:    form.evolve + form.inject + form.link + extra.tone,
       mechanics: form.mechanics,
-      archive:   form.chatcache + extra.data + checkpointSection,
-      worldbook: extra.worldbook,
-      debug:     debugSection,
-      about:     renderAbout()
+
+      archive:   form.chatcache + checkpointSection + form.backfill + extra.worldbook + form.filter + form.display + extra.data + debugSection + renderAbout()
+
+
+
+
+
+
+
     };
 
     const tabBar = '<div class="we-settings-tabs-shell">'
-      + '<button class="we-settings-tab-scroll" data-dir="-1" title="向左滚动"><i class="fa-solid fa-chevron-left"></i></button>'
+      + '<button class="we-settings-tab-scroll" data-dir="-1" title="向左滚动" style="display:none;"><i class="fa-solid fa-chevron-left"></i></button>'
       + '<div class="we-settings-tabs" id="we-settings-tabs">'
       + SETTINGS_TABS.map(t =>
           '<button class="we-settings-tab' + (t.key === _settingsTab ? ' we-settings-tab--active' : '')
-          + '" data-tab="' + t.key + '">' + t.label + '</button>').join('')
+          + '" data-tab="' + t.key + '">' + (t.icon ? '<i class="fa-solid ' + t.icon + '"></i> ' : '') + t.label + '</button>').join('')
       + '</div>'
-      + '<button class="we-settings-tab-scroll" data-dir="1" title="向右滚动"><i class="fa-solid fa-chevron-right"></i></button>'
+      + '<button class="we-settings-tab-scroll" data-dir="1" title="向右滚动" style="display:none;"><i class="fa-solid fa-chevron-right"></i></button>'
       + '</div>';
 
     const panels = SETTINGS_TABS.map(t =>
@@ -2111,12 +2339,18 @@ window.WORLD_ENGINE_UI = (function() {
       + '<button class="we-icon-btn" id="we-btn-back" title="返回"><i class="fa-solid fa-arrow-left"></i></button>'
       + '<span class="we-sub-title">设置</span>'
       + '</div>'
+      + '<div class="we-settings-search-shell"><div class="we-settings-search-box">'
+      + '<i class="fa-solid fa-magnifying-glass we-settings-search-icon"></i>'
+      + '<input type="text" class="we-settings-search-input" id="we-settings-search" placeholder="快速过滤设置项 (API、重填、骰子、注入...)" autocomplete="off">'
+      + '<button type="button" class="we-settings-search-clear" id="we-settings-search-clear" title="清空搜索" style="display:none;">✕</button>'
+      + '</div>'
+      + '</div>'
       + tabBar
       + panels
       // 保存/重置：底部常驻（sticky），任何选项卡都能一键保存全部设置
       + '<div class="we-settings-save-actions we-settings-save-sticky">'
-      + '<button class="we-btn" id="we-save-settings">保存设置</button>'
-      + '<button class="we-btn we-btn-danger" id="we-reset-world">重置世界</button>'
+      + '<button class="we-btn we-btn-primary" id="we-save-settings"><i class="fa-solid fa-check"></i> 保存全部设置</button>'
+      + '<button class="we-btn we-btn-danger" id="we-reset-world"><i class="fa-solid fa-triangle-exclamation"></i> 重置世界</button>'
       + '</div>';
   }
 
@@ -4941,7 +5175,7 @@ window.WORLD_ENGINE_UI = (function() {
     if (settingsOpenBtn) settingsOpenBtn.onclick = () => {
       const face = getEngineFace();
       if (typeof face.openSettings === 'function') face.openSettings();
-      else if (face.id === 'world') _currentView = 'settings';
+      else if (face.id === 'world') _currentView = _currentView === 'settings' ? 'home' : 'settings';
       refresh();
     };
 
@@ -4996,11 +5230,60 @@ window.WORLD_ENGINE_UI = (function() {
           p.style.display = (p.dataset.tab === key) ? '' : 'none');
         tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
         // [FIX] 切到调试 tab 时，局部刷新 renderDebug 拉最新一轮推演数据（不动其它 tab 输入）
-        if (key === 'debug') {
+        const sInput = document.getElementById('we-settings-search') || document.getElementById('we-memory-settings-search');
+        if (sInput && sInput.value) {
+          sInput.value = '';
+          const sClear = document.getElementById('we-settings-search-clear') || document.getElementById('we-memory-settings-search-clear');
+          if (sClear) sClear.style.display = 'none';
+          document.querySelectorAll('.we-settings-panel .we-section').forEach(s => { s.style.display = ''; });
+        }
+        if (key === 'archive' || key === 'debug') {
           if (typeof face.refreshDebug === 'function') face.refreshDebug();
           else { refreshDebugRender(); refreshPresetManage(); }
         }
       };
+    });
+
+    // ===== 设置项即时搜索过滤 =====
+    ['we-settings-search', 'we-memory-settings-search'].forEach(id => {
+      const input = document.getElementById(id);
+      if (!input) return;
+      const clearBtn = document.getElementById(id + '-clear');
+      const applyFilter = () => {
+        const query = (input.value || '').trim().toLowerCase();
+        if (clearBtn) clearBtn.style.display = query ? '' : 'none';
+        const allSections = document.querySelectorAll('.we-settings-panel .we-section');
+        const allPanels = document.querySelectorAll('.we-settings-panel');
+        if (!query) {
+          allSections.forEach(s => { s.style.display = ''; });
+          const face = getEngineFace();
+          const activeKey = face.id === 'memory' ? _memorySettingsTab : _settingsTab;
+          allPanels.forEach(p => { p.style.display = (p.dataset.tab === activeKey) ? '' : 'none'; });
+          return;
+        }
+        allPanels.forEach(p => {
+          let matches = 0;
+          p.querySelectorAll('.we-section').forEach(sec => {
+            const text = (sec.textContent || '').toLowerCase();
+            const secId = (sec.id || '').toLowerCase();
+            if (text.includes(query) || secId.includes(query)) {
+              sec.style.display = '';
+              matches++;
+            } else {
+              sec.style.display = 'none';
+            }
+          });
+          p.style.display = matches > 0 ? '' : 'none';
+        });
+      };
+      input.oninput = applyFilter;
+      if (clearBtn) {
+        clearBtn.onclick = () => {
+          input.value = '';
+          applyFilter();
+          input.focus();
+        };
+      }
     });
 
     // 「关于」卡内的版本下拉切换：复用 #we-preset-select 范式（点击弹出原生可滚动列表）。
@@ -6323,7 +6606,7 @@ window.WORLD_ENGINE_UI = (function() {
     handle.style.cursor = 'grab';
 
     handle.addEventListener('mousedown', function(e) {
-      if (e.target.closest('.we-panel-close') || e.target.closest('.we-panel-corner-actions') || e.target.closest('.we-engine-face-toggle')) return;
+      if (e.target.closest('.we-panel-close') || e.target.closest('.we-panel-corner-actions') || e.target.closest('.we-engine-face-toggle') || e.target.closest('.we-segmented-switch')) return;
       dragging = true;
       const rect = panel.getBoundingClientRect();
       startX = e.clientX; startY = e.clientY;
@@ -7028,6 +7311,7 @@ window.WORLD_ENGINE_UI = (function() {
       document.body.appendChild(btn);
       wireSatellites(btn);
       syncBallFace();
+    updateDashboardChrome();
       applyBallPos(btn);
       makeBallDraggable(btn);
       window.addEventListener('resize', () => applyBallPos(btn));

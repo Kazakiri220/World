@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>世界引擎 UI 重构与布局美化设计原型</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    :root {
+      --we-bg: #182028;
+      --we-bg2: #13232c;
+      --we-bg-hl: #24414a;
+      --we-card: #1d2833;
+      --we-card-border: rgba(208, 170, 88, 0.22);
+      --we-surface: #1f3642;
+      --we-border: rgba(208, 170, 88, 0.28);
+      --we-text: #e5f0ed;
+      --we-text2: #a7bbb7;
+      --we-text3: #6e8b88;
+      --we-accent: #58b8a9;
+      --we-accent-glow: rgba(88, 184, 169, 0.25);
+      --we-danger: #d66f68;
+      --we-success: #69b68e;
+      --we-gold: #d0aa58;
+      --we-gold-glow: rgba(208, 170, 88, 0.2);
+      --we-hairline: rgba(255, 255, 255, 0.08);
+      --we-radius: 10px;
+    }
+
+    [data-theme="night"] {
+      --we-bg: #17181c;
+      --we-bg2: #121317;
+      --we-bg-hl: #2b2e36;
+      --we-card: #1e2026;
+      --we-card-border: rgba(255, 255, 255, 0.12);
+      --we-surface: #262832;
+      --we-border: rgba(255, 255, 255, 0.16);
+      --we-text: #e8e9ec;
+      --we-text2: #b8bbc3;
+      --we-text3: #8a8e99;
+      --we-accent: #8ab4f8;
+      --we-gold: #c7a86a;
+    }
+
+    [data-theme="paper"] {
+      --we-bg: #f4f6f8;
+      --we-bg2: #eaecef;
+      --we-bg-hl: #dfe3e8;
+      --we-card: #ffffff;
+      --we-card-border: rgba(0, 0, 0, 0.12);
+      --we-surface: #f0f2f5;
+      --we-border: rgba(0, 0, 0, 0.14);
+      --we-text: #232f39;
+      --we-text2: #52606d;
+      --we-text3: #7b8794;
+      --we-accent: #267568;
+      --we-gold: #8f671b;
+      --we-hairline: rgba(0, 0, 0, 0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: #0b1116;
+      color: var(--we-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    /* 顶部导航条（用于演示控制） */
+    .demo-bar {
+      width: 100%;
+      max-width: 900px;
+      background: rgba(20, 30, 40, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--we-border);
+      border-radius: 12px;
+      padding: 12px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .demo-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--we-gold);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .demo-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .demo-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--we-border);
+      background: var(--we-surface);
+      color: var(--we-text);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .demo-btn.active, .demo-btn:hover {
+      background: var(--we-accent);
+      color: #fff;
+      border-color: var(--we-accent);
+    }
+
+    /* 布局演示双容器 */
+    .preview-container {
+      display: flex;
+      gap: 32px;
+      justify-content: center;
+      width: 100%;
+      max-width: 1100px;
+      flex-wrap: wrap;
+    }
+
+    /* 单独的对比/设计说明栏 */
+    .design-notes {
+      flex: 1;
+      min-width: 320px;
+      max-width: 480px;
+      background: var(--we-card);
+      border: 1px solid var(--we-card-border);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.4);
+    }
+    .note-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      background: rgba(208, 170, 88, 0.15);
+      border: 1px solid var(--we-gold);
+      color: var(--we-gold);
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      width: fit-content;
+    }
+    .note-h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--we-text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .note-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--we-text2);
+    }
+    .note-item {
+      padding: 10px 12px;
+      background: var(--we-surface);
+      border-radius: 8px;
+      border-left: 3px solid var(--we-accent);
+    }
+    .note-item strong {
+      color: var(--we-text);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    /* ===== 酒馆插件面板模拟器 (仿真实体) ===== */
+    .we-mockup-panel {
+      width: 420px;
+      max-width: 100%;
+      height: 780px;
+      background: var(--we-bg);
+      border: 1px solid var(--we-border);
+      border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(208,170,88,0.12);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 1. 顶部 Header */
+    .panel-header {
+      padding: 12px 16px 10px;
+      background: rgba(19, 35, 44, 0.6);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--we-hairline);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    /* 双核分段切换器 */
+    .segmented-switch {
+      display: flex;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--we-border);
+      border-radius: 20px;
+      padding: 2px;
+      position: relative;
+    }
+    .segmented-tab {
+      padding: 4px 12px;
+      border-radius: 16px;
+      border: none;
+      background: transparent;
+      color: var(--we-text2);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .segmented-tab.active {
+      background: var(--we-accent);
+      color: #ffffff;
+      box-shadow: 0 2px 8px var(--we-accent-glow);
+    }
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--we-hairline);
+      color: var(--we-text2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .icon-btn:hover {
+      background: rgba(255,255,255,0.12);
+      color: var(--we-text);
+    }
+    .icon-btn.active {
+      color: var(--we-gold);
+      border-color: var(--we-gold);
+      background: rgba(208,170,88,0.15);
+    }
+
+    /* 状态胶囊栏 */
+    .header-status-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 10px;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--we-text2);
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--we-success);
+      box-shadow: 0 0 6px var(--we-success);
+    }
+
+    /* 2. 设置界面导航与搜索 */
+    .settings-subnav {
+      padding: 8px 12px;
+      background: var(--we-bg2);
+      border-bottom: 1px solid var(--we-border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    /* 搜索框 */
+    .settings-search-box {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .settings-search-box i {
+      position: absolute;
+      left: 10px;
+      font-size: 12px;
+      color: var(--we-text3);
+    }
+    .settings-search-input {
+      width: 100%;
+      padding: 6px 10px 6px 30px;
+      border-radius: 6px;
+      border: 1px solid var(--we-hairline);
+      background: var(--we-bg);
+      color: var(--we-text);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .settings-search-input:focus {
+      border-color: var(--we-accent);
+      box-shadow: 0 0 8px var(--we-accent-glow);
+    }
+
+    /* 4 大主选项卡 (平铺满宽，不横滑溢出) */
+    .settings-nav-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 3px;
+      border-radius: 8px;
+    }
+    .nav-tab-btn {
+      padding: 7px 4px;
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      color: var(--we-text2);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.15s ease;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .nav-tab-btn i {
+      font-size: 13px;
+    }
+    .nav-tab-btn:hover {
+      color: var(--we-text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .nav-tab-btn.active {
+      color: #ffffff;
+      background: var(--we-surface);
+      font-weight: 600;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      border-bottom: 2px solid var(--we-gold);
+    }
+
+    /* 3. 面板内容主体 (可滚动) */
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .panel-body::-webkit-scrollbar {
+      width: 5px;
+    }
+    .panel-body::-webkit-scrollbar-thumb {
+      background: rgba(208, 170, 88, 0.3);
+      border-radius: 4px;
+    }
+
+    /* 统一卡片式分区 (Settings Card) */
+    .cfg-card {
+      background: var(--we-card);
+      border: 1px solid var(--we-card-border);
+      border-radius: var(--we-radius);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.2s;
+    }
+    .cfg-card:hover {
+      border-color: rgba(208, 170, 88, 0.4);
+    }
+    .cfg-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--we-gold);
+      border-bottom: 1px solid var(--we-hairline);
+      padding-bottom: 6px;
+    }
+    .cfg-card-header span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cfg-tag {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(88, 184, 169, 0.15);
+      color: var(--we-accent);
+      font-weight: normal;
+    }
+
+    /* 表单组件规范 */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .form-label {
+      font-size: 11px;
+      color: var(--we-text2);
+      display: flex;
+      justify-content: space-between;
+    }
+    .form-hint {
+      font-size: 10px;
+      color: var(--we-text3);
+      line-height: 1.4;
+    }
+    .form-control {
+      width: 100%;
+      padding: 6px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--we-hairline);
+      background: var(--we-bg2);
+      color: var(--we-text);
+      font-size: 12px;
+      outline: none;
+      transition: all 0.2s;
+    }
+    .form-control:focus {
+      border-color: var(--we-accent);
+    }
+    .form-row {
+      display: flex;
+      gap: 8px;
+    }
+    .form-row > * {
+      flex: 1;
+    }
+
+    /* 现代开关 (Switch 代替原生复选框) */
+    .switch-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      color: var(--we-text);
+    }
+    .switch-toggle {
+      width: 34px;
+      height: 18px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      position: relative;
+      transition: background 0.25s;
+    }
+    .switch-toggle::after {
+      content: "";
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    input[type="checkbox"]:checked + .switch-toggle {
+      background: var(--we-accent);
+    }
+    input[type="checkbox"]:checked + .switch-toggle::after {
+      transform: translateX(16px);
+    }
+    input[type="checkbox"] {
+      display: none;
+    }
+
+    /* 按钮规范 */
+    .btn-group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 500;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: var(--we-accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+    .btn-outline {
+      background: transparent;
+      border-color: var(--we-card-border);
+      color: var(--we-text);
+    }
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--we-gold);
+    }
+    .btn-danger {
+      background: rgba(214, 111, 104, 0.15);
+      border-color: rgba(214, 111, 104, 0.3);
+      color: var(--we-danger);
+    }
+    .btn-danger:hover {
+      background: var(--we-danger);
+      color: #fff;
+    }
+
+    /* 4. 底部吸底保存栏 */
+    .panel-footer-actions {
+      padding: 10px 14px;
+      background: rgba(19, 35, 44, 0.85);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--we-border);
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .btn-save-all {
+      flex: 1;
+      padding: 9px;
+      background: linear-gradient(135deg, var(--we-gold), #b8913b);
+      color: #121a20;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 4px 12px rgba(208, 170, 88, 0.25);
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .btn-save-all:active {
+      transform: scale(0.98);
+    }
+
+    /* 折叠抽屉与微调 */
+    .foldable-summary {
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--we-text2);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      user-select: none;
+    }
+    .foldable-summary:hover {
+      color: var(--we-accent);
+    }
+    details[open] > .foldable-summary {
+      color: var(--we-accent);
+      margin-bottom: 8px;
+    }
+
+    .badge-counter {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      font-size: 10px;
+      color: var(--we-text3);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部交互演示切换栏 -->
+  <div class="demo-bar">
+    <div class="demo-title">
+      <i class="fa-solid fa-compass-drafting"></i>
+      <span>世界引擎 UI 改造交互演示原型</span>
+    </div>
+    <div class="demo-controls">
+      <span style="font-size:12px;color:var(--we-text3);">切换配色：</span>
+      <button class="demo-btn active" onclick="setTheme('default', this)">墨玉 (默认)</button>
+      <button class="demo-btn" onclick="setTheme('night', this)">夜幕 (深黑)</button>
+      <button class="demo-btn" onclick="setTheme('paper', this)">纸白 (明亮)</button>
+    </div>
+  </div>
+
+  <div class="preview-container">
+
+    <!-- 真实面板容器模拟 -->
+    <div class="we-mockup-panel">
+
+      <!-- 1. 顶部 Header -->
+      <div class="panel-header">
+        <div class="header-top">
+          <!-- 醒目的双核分段切换器 (Segmented Switch) -->
+          <div class="segmented-switch">
+            <button class="segmented-tab active" id="btn-face-world" onclick="switchEngine('world')">
+              <i class="fa-solid fa-earth-americas"></i> 世界引擎
+            </button>
+            <button class="segmented-tab" id="btn-face-memory" onclick="switchEngine('memory')">
+              <i class="fa-solid fa-brain"></i> 记忆引擎
+            </button>
+          </div>
+
+          <!-- 右侧动作 -->
+          <div class="header-actions">
+            <button class="icon-btn active" title="当前在设置界面" id="btn-mock-settings">
+              <i class="fa-solid fa-gear"></i>
+            </button>
+            <button class="icon-btn" title="关闭面板">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 状态胶囊条 -->
+        <div class="header-status-pill">
+          <div class="status-badge">
+            <span class="status-dot"></span>
+            <span id="txt-engine-mode">自动推演 · 每 1 轮</span>
+          </div>
+          <div style="color:var(--we-gold);">
+            <span>稳定度: <strong>92.5% (泰平)</strong></span> · <span>第 42 轮</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 设置分类导航与即时搜索 -->
+      <div class="settings-subnav">
+        <!-- 搜索框 -->
+        <div class="settings-search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" class="settings-search-input" id="cfg-search" placeholder="快速过滤设置项 (如: API、骰子、重填、注入...)" oninput="filterSettings(this.value)">
+        </div>
+
+        <!-- 4 大核心分类 Tab (4等分，彻底告别横向滑动) -->
+        <div class="settings-nav-tabs">
+          <button class="nav-tab-btn active" onclick="switchTab('conn', this)">
+            <i class="fa-solid fa-plug"></i>
+            <span>连接模型</span>
+          </button>
+          <button class="nav-tab-btn" onclick="switchTab('evolve', this)">
+            <i class="fa-solid fa-bolt"></i>
+            <span>推演注入</span>
+          </button>
+          <button class="nav-tab-btn" onclick="switchTab('mechanics', this)">
+            <i class="fa-solid fa-dice"></i>
+            <span>本地机制</span>
+          </button>
+          <button class="nav-tab-btn" onclick="switchTab('archive', this)">
+            <i class="fa-solid fa-box-archive"></i>
+            <span>存档系统</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 3. 内容主体 -->
+      <div class="panel-body" id="settings-scroll-body">
+
+        <!-- ========== TAB 1: 🔌 连接与模型 ========== -->
+        <div class="tab-pane" id="pane-conn">
+          
+          <!-- API 配置卡片 -->
+          <div class="cfg-card" data-kw="api url key 模型 连接 代理 proxy profile">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-server"></i> API 连接管理</span>
+              <span class="cfg-tag">独立供应商池</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">切换当前连接配置</label>
+              <select class="form-control">
+                <option>DeepSeek 官方 API (主力推演)</option>
+                <option>OpenAI GPT-4o-mini</option>
+                <option>酒馆内置配置 (继承前端连接)</option>
+              </select>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div class="btn-group">
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-floppy-disk"></i> 保存</button>
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-plus"></i> 另存为</button>
+              <button class="btn btn-outline" style="flex:1;color:var(--we-accent);border-color:var(--we-accent);"><i class="fa-solid fa-vial"></i> 测试连接</button>
+              <button class="btn btn-danger" title="删除当前连接"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">连接方式</label>
+              <select class="form-control">
+                <option>直连（默认，推荐国内中转或兼容端）</option>
+                <option>经酒馆代理（解决跨域 CORS 拦截问题）</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">API URL</label>
+              <input type="text" class="form-control" value="https://api.deepseek.com/v1" placeholder="https://api.openai.com/v1">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <input type="password" class="form-control" value="sk-xxxxxxxxxxxxxxxx">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex:2;">
+                <label class="form-label">推演模型</label>
+                <input type="text" class="form-control" value="deepseek-chat">
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-outline" style="height:29px;width:100%;"><i class="fa-solid fa-list"></i> 获取列表</button>
+              </div>
+            </div>
+
+            <!-- 折叠高级参数 -->
+            <details>
+              <summary class="foldable-summary"><i class="fa-solid fa-sliders"></i> 高级生成参数 (温度 / Token / 超时)</summary>
+              <div class="form-row" style="margin-top:8px;">
+                <div class="form-group">
+                  <label class="form-label">温度 (Temperature)</label>
+                  <input type="number" class="form-control" value="0.7" step="0.1">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">最大输出 Token</label>
+                  <input type="number" class="form-control" value="4096">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">超时时间 (秒)</label>
+                  <input type="number" class="form-control" value="120">
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- API 自动重试卡片 (原在高级最底部，现移至 API 旁) -->
+          <div class="cfg-card" data-kw="retry 重试 异常 网络 失败">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-rotate"></i> API 异常自动重试</span>
+              <span class="badge-counter">原深埋在高级</span>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex:2;">
+                <label class="form-label">失败自动重试次数</label>
+                <select class="form-control">
+                  <option>关闭（不重试）</option>
+                  <option selected>重试 1 次</option>
+                  <option>重试 2 次</option>
+                  <option>重试 3 次</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex:3;">
+                <label class="form-label">支持重试类型</label>
+                <div class="form-hint" style="margin-top:6px;">包含空返回、乱码、JSON解析失败、504超时及网络断连。</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ========== TAB 2: ⚡ 推演与注入 ========== -->
+        <div class="tab-pane" id="pane-evolve" style="display:none;">
+          
+          <!-- 推演模式与频率 -->
+          <div class="cfg-card" data-kw="推演 模式 开关 频率 轮数 时间 开场白 evolve">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-play"></i> 推演触发与时机</span>
+            </div>
+
+            <label class="switch-label">
+              <span>启用世界推演</span>
+              <input type="checkbox" checked>
+              <span class="switch-toggle"></span>
+            </label>
+
+            <label class="switch-label">
+              <span>首楼为 AI 开场白 (忽略第 0 层)</span>
+              <input type="checkbox" checked>
+              <span class="switch-toggle"></span>
+            </label>
+
+            <div class="form-group">
+              <label class="form-label">推演模式</label>
+              <select class="form-control">
+                <option>自动 · 每隔固定轮数推演 (推荐)</option>
+                <option>按剧情时间流逝推演</option>
+                <option>完全手动触发</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">推演间隔 (每 X 轮)</label>
+                <input type="number" class="form-control" value="1" min="1">
+              </div>
+              <div class="form-group">
+                <label class="form-label">推演阅读上下文轮数</label>
+                <input type="number" class="form-control" value="1" min="1">
+              </div>
+            </div>
+          </div>
+
+          <!-- 正文注入卡片 -->
+          <div class="cfg-card" data-kw="注入 prompt 提示词 字符 深度 inject">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-syringe"></i> 正文状态注入</span>
+            </div>
+
+            <label class="switch-label">
+              <span>注入世界状态至提示词 (Prompt)</span>
+              <input type="checkbox" checked>
+              <span class="switch-toggle"></span>
+            </label>
+
+            <label class="switch-label">
+              <span>全等级注入 (开启时 Lv1-Lv4 全部注入)</span>
+              <input type="checkbox">
+              <span class="switch-toggle"></span>
+            </label>
+
+            <div class="form-group">
+              <label class="form-label">最大注入字符数</label>
+              <input type="number" class="form-control" value="5000" step="500">
+              <div class="form-hint">防止世界状态过长挤爆酒馆上下文。超出后将优先保留高危事件与关键关系。</div>
+            </div>
+          </div>
+
+          <!-- 双引擎联动卡片 (原独立的联动Tab合并至此) -->
+          <div class="cfg-card" data-kw="联动 记忆 世界 memory link">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-link"></i> 世界 ↔ 记忆双核联动</span>
+              <span class="cfg-tag">双向打通</span>
+            </div>
+            <label class="switch-label">
+              <span>世界推演时自动挂载相关人物/实体记忆</span>
+              <input type="checkbox" checked>
+              <span class="switch-toggle"></span>
+            </label>
+            <div class="form-hint">推演时会扫描世界状态中出现的名字，命中记忆库后作为前置背景提供给推演 API。</div>
+          </div>
+
+          <!-- 正文规则与基调 (原高级底部) -->
+          <div class="cfg-card" data-kw="基调 风格 规则 题材 tone">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-feather-pointed"></i> 题材风格与演化基调</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">推演指导基调 (可选自定义补充)</label>
+              <textarea class="form-control" rows="2" placeholder="例如：硬核克苏鲁风格，强调未知恐慌与不可挽回的代价..."></textarea>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ========== TAB 3: 🎲 本地规则机制 ========== -->
+        <div class="tab-pane" id="pane-mechanics" style="display:none;">
+          
+          <div class="cfg-card" data-kw="区域事件 突发 爆发 regional">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-map-location-dot"></i> 区域突发事件机制</span>
+              <span class="cfg-tag">独立状态机</span>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">基础爆发率 (%)</label>
+                <input type="number" class="form-control" value="15" min="0" max="100">
+              </div>
+              <div class="form-group">
+                <label class="form-label">持续轮数</label>
+                <input type="number" class="form-control" value="3" min="1">
+              </div>
+              <div class="form-group">
+                <label class="form-label">冷却轮数</label>
+                <input type="number" class="form-control" value="5" min="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-card" data-kw="近端事件 远方 随机事件 random near distant">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-shuffle"></i> 近端 & 远方随机事件</span>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">近端触发概率 (%)</label>
+                <input type="number" class="form-control" value="30">
+              </div>
+              <div class="form-group">
+                <label class="form-label">远方触发概率 (%)</label>
+                <input type="number" class="form-control" value="20">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">远方事件触发账本门槛条数</label>
+              <input type="number" class="form-control" value="8">
+            </div>
+          </div>
+
+          <div class="cfg-card" data-kw="骰子 检定 dice 推进 判定">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-dice-d20"></i> 事件推进骰子判定</span>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">推进阈值 (DC)</label>
+                <input type="number" class="form-control" value="60">
+              </div>
+              <div class="form-group">
+                <label class="form-label">最大连胜加成</label>
+                <input type="number" class="form-control" value="15">
+              </div>
+            </div>
+          </div>
+
+          <div class="cfg-card" data-kw="风声 消散 上限 衰减 wind cap">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-wind"></i> 风声消散与数据实体上限</span>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">风声存活轮数</label>
+                <input type="number" class="form-control" value="4">
+              </div>
+              <div class="form-group">
+                <label class="form-label">事件链保留上限</label>
+                <input type="number" class="form-control" value="10">
+              </div>
+              <div class="form-group">
+                <label class="form-label">势力保留上限</label>
+                <input type="number" class="form-control" value="8">
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ========== TAB 4: 📦 存档与系统 ========== -->
+        <div class="tab-pane" id="pane-archive" style="display:none;">
+          
+          <!-- 历史与重填卡片 (原分散在高级与存档) -->
+          <div class="cfg-card" data-kw="历史 缓存 楼层 追溯 批量重填 backfill cache">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-clock-rotate-left"></i> 对话历史保留与批量重填</span>
+              <span class="cfg-tag">核心工具</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">保留世界历史楼层数</label>
+              <input type="number" class="form-control" value="50">
+              <div class="form-hint">超出楼层的历史快照会自动精简，防止单文件存档体积过大膨胀。</div>
+            </div>
+            <div class="form-row" style="margin-top:4px;">
+              <div class="form-group">
+                <label class="form-label">重填批次大小</label>
+                <input type="number" class="form-control" value="5">
+              </div>
+              <div class="form-group">
+                <label class="form-label">起始楼层</label>
+                <input type="number" class="form-control" value="0">
+              </div>
+            </div>
+            <button class="btn btn-primary" style="margin-top:4px;"><i class="fa-solid fa-wand-magic-sparkles"></i> 启动历史批量重填推演</button>
+          </div>
+
+          <!-- Prompt 预设管理 (原深埋在调试底部，现作为核心功能提级) -->
+          <div class="cfg-card" data-kw="预设 prompt 提示词 自定义 调试 preset">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-code-branch"></i> 引擎 Prompt 分段预设</span>
+              <span class="badge-counter" style="color:var(--we-gold);border:1px solid var(--we-gold);">特色推荐</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">当前生效预设</label>
+              <select class="form-control">
+                <option>默认预设 (官方标准推演逻辑)</option>
+                <option>硬核推演 · 多势力交织版</option>
+                <option>日常轻量 · 侧重人际关系版</option>
+              </select>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-pen-to-square"></i> 编辑分段</button>
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-file-export"></i> 导出预设</button>
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-file-import"></i> 导入预设</button>
+            </div>
+          </div>
+
+          <!-- 数据与存档点 -->
+          <div class="cfg-card" data-kw="存档点 导出 备份 重置 导入 data checkpoint">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-database"></i> 数据管理与存档点</span>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-download"></i> 导出世界数据 (JSON)</button>
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-upload"></i> 导入备份</button>
+            </div>
+            <div class="btn-group" style="margin-top:4px;">
+              <button class="btn btn-outline" style="flex:1;"><i class="fa-solid fa-bug"></i> 导出诊断包</button>
+              <button class="btn btn-danger" style="flex:1;"><i class="fa-solid fa-triangle-exclamation"></i> 重置当前世界</button>
+            </div>
+          </div>
+
+          <!-- 系统与外观 -->
+          <div class="cfg-card" data-kw="主题 外观 紧凑 悬浮球 关于 日志 theme display about">
+            <div class="cfg-card-header">
+              <span><i class="fa-solid fa-palette"></i> 界面外观与更新日志</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">面板配色主题</label>
+              <select class="form-control">
+                <option>墨玉 (深青墨绿 · 默认)</option>
+                <option>夜幕 (纯粹黑灰)</option>
+                <option>深海 (科技深蓝)</option>
+                <option>紫藤 (梦幻暗紫)</option>
+                <option>纸白 (日间明亮)</option>
+              </select>
+            </div>
+            <div class="form-hint" style="display:flex;justify-content:space-between;align-items:center;">
+              <span>世界引擎 v3.3.4 (MIT License)</span>
+              <a href="#" style="color:var(--we-gold);text-decoration:none;" onclick="alert('点击可展开查看详细更新日志')">查看更新日志 ></a>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- 4. 底部常驻保存条 (Sticky) -->
+      <div class="panel-footer-actions">
+        <button class="btn-save-all" onclick="alert('模拟成功：所有设置已安全保存！')">
+          <i class="fa-solid fa-check"></i> 保存当前全部设置
+        </button>
+      </div>
+
+    </div>
+
+    <!-- 右侧：设计思想与改动对比清单 -->
+    <div class="design-notes">
+      <span class="note-badge">布局方案对比清单</span>
+      <h2 class="note-h2"><i class="fa-solid fa-lightbulb"></i> 为什么这样重组更高效？</h2>
+
+      <div class="note-list">
+        <div class="note-item">
+          <strong>1. 8 Tab ➔ 4 Tab，彻底消灭横向滚动</strong>
+          原本在 420px 下需要点左右箭头横滑才能找齐 8 个 Tab。现在 4 等分平铺，手指或鼠标一点即达，任何模块都不再被遮挡。
+        </div>
+
+        <div class="note-item">
+          <strong>2. 原被“藏匿”的高频功能全面归位</strong>
+          • <strong>API 自动重试</strong>：从「高级」移回「API 配置」正下方。<br>
+          • <strong>批量重填</strong>：从「高级」移回「存档与历史」生命周期中。<br>
+          • <strong>Prompt 预设定制</strong>：从「调试」最底层解救出来，给予醒目入口。
+        </div>
+
+        <div class="note-item">
+          <strong>3. 新增「设置即时过滤搜索框」</strong>
+          在设置顶部输入关键词（如 <span style="color:var(--we-gold)">骰子</span>、<span style="color:var(--we-gold)">重填</span>、<span style="color:var(--we-gold)">API</span>、<span style="color:var(--we-gold)">注入</span>），所有卡片实时精准过滤，彻底解决“找半天”的痛点！
+        </div>
+
+        <div class="note-item">
+          <strong>4. 顶部直观双核切换器 (Segmented Switch)</strong>
+          将原本隐蔽的“点击标题 3D 翻转”升级为顶部直接可见的胶囊双选按钮，再也不会不知道当前在配置世界还是记忆。
+        </div>
+
+        <div class="note-item">
+          <strong>5. 视觉升级：卡片化 + 优雅 Switch 开关</strong>
+          告别灰暗密集的“表单堆叠”，采用卡片独立封装、发光边框和圆角开关，高频参数置顶，微调参数折叠收纳。
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // 配色切换
+    function setTheme(name, btn) {
+      document.querySelectorAll('.demo-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (name === 'default') document.body.removeAttribute('data-theme');
+      else document.body.setAttribute('data-theme', name);
+    }
+
+    // 引擎切换
+    function switchEngine(type) {
+      document.getElementById('btn-face-world').classList.toggle('active', type === 'world');
+      document.getElementById('btn-face-memory').classList.toggle('active', type === 'memory');
+      const modeText = document.getElementById('txt-engine-mode');
+      if (type === 'world') {
+        modeText.textContent = '自动推演 · 每 1 轮';
+      } else {
+        modeText.textContent = '记忆提取 · 每轮自动整理';
+      }
+    }
+
+    // Tab 切换
+    function switchTab(tabKey, btn) {
+      document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      const targetPane = document.getElementById('pane-' + tabKey);
+      if (targetPane) targetPane.style.display = 'flex';
+      targetPane.style.flexDirection = 'column';
+      targetPane.style.gap = '12px';
+
+      // 清空搜索框
+      document.getElementById('cfg-search').value = '';
+      document.querySelectorAll('.cfg-card').forEach(c => c.style.display = 'flex');
+    }
+
+    // 即时搜索过滤
+    function filterSettings(keyword) {
+      const kw = (keyword || '').trim().toLowerCase();
+      const currentPane = document.querySelector('.tab-pane[style*="display: flex"], .tab-pane:not([style*="display: none"])');
+      const allCards = document.querySelectorAll('.cfg-card');
+
+      if (!kw) {
+        allCards.forEach(c => c.style.display = 'flex');
+        return;
+      }
+
+      // 如果搜索有输入，跨 Tab 检查或者在当前 Tab 搜索
+      let matchCount = 0;
+      allCards.forEach(card => {
+        const text = card.textContent.toLowerCase();
+        const customKw = (card.getAttribute('data-kw') || '').toLowerCase();
+        if (text.includes(kw) || customKw.includes(kw)) {
+          card.style.display = 'flex';
+          // 自动让其所在的 pane 显示
+          const parentPane = card.closest('.tab-pane');
+          if (parentPane) {
+            parentPane.style.display = 'flex';
+            parentPane.style.flexDirection = 'column';
+            parentPane.style.gap = '12px';
+          }
+          matchCount++;
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
