@@ -613,14 +613,7 @@
   flex-shrink: 0;
   color: var(--we-text3);
 }
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 14px 16px 10px;
-  background: transparent;
-  flex-shrink: 0;
-  user-select: none;
-}
+
 /* ===== 分类胶囊栏 (Phase 3) ===== */
 .we-category-chips-bar {
   display: flex;
@@ -806,9 +799,50 @@
 
 .we-header-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .we-header-story-time { color: var(--we-text2); font-size: 11px; overflow-wrap: anywhere; }
-.we-time-annotations { margin: 8px 0; color: var(--we-text2); font-size: 11px; overflow-wrap: anywhere; }
-.we-time-annotations > summary { cursor: pointer; line-height: 1.6; }
-.we-time-annotations[open] { padding: 8px; border: 1px solid var(--we-border); border-radius: 6px; background: var(--we-bg); }
+.we-time-annotations {
+  margin: 6px 0;
+  color: var(--we-text2);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  position: relative;
+  z-index: 1;
+  clear: both;
+}
+.we-time-annotations > summary {
+  cursor: pointer;
+  line-height: 1.6;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--we-border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--we-text2);
+  transition: all 0.15s ease;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.we-time-annotations > summary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--we-text);
+  border-color: var(--we-accent);
+}
+.we-time-annotations[open] {
+  padding: 10px;
+  border: 1px solid var(--we-border);
+  border-radius: 8px;
+  background: var(--we-card, var(--we-bg));
+  margin: 8px 0;
+}
+.we-time-annotations[open] > summary {
+  margin-bottom: 8px;
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+}
 .we-time-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; margin: 8px 0; }
 .we-time-fields label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .we-time-fields input { box-sizing: border-box; width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--we-border); border-radius: 4px; background: var(--we-bg2); color: var(--we-text); font: inherit; }
@@ -1111,7 +1145,34 @@
   margin-bottom: 8px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
+}
+
+.we-btn-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--we-accent);
+  background: color-mix(in srgb, var(--we-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--we-accent) 28%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.we-btn-mini:hover {
+  background: color-mix(in srgb, var(--we-accent) 22%, transparent);
+  border-color: var(--we-accent);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.we-btn-mini:active {
+  transform: translateY(0);
 }
 
 .we-section-toggle {
@@ -1120,6 +1181,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .we-section-toggle:hover {
@@ -1653,8 +1716,8 @@
   .we-memory-sub-poem { display: none; }
   .we-memory-line { grid-template-columns: 84px minmax(0, 1fr); gap: 7px; }
   .we-memory-entry-edit { grid-template-columns: 1fr 28px; }
-  .we-memory-entry-time { grid-column: 1; }
-  .we-memory-entry-content { grid-column: 1; }
+  .we-memory-entry-time { grid-column: 1; grid-row: 1; }
+  .we-memory-entry-content { grid-column: 1; grid-row: 2; }
   .we-memory-entry-known-by { grid-column: 1; grid-row: 3; }
   .we-memory-entry-edit .we-memory-remove-entry { grid-column: 2; grid-row: 1 / span 3; }
 }
@@ -1777,6 +1840,9 @@
   gap: 3px;
 }
 
+.we-event-item-terminal {
+  padding-bottom: 34px;
+}
 .we-event-item-terminal > .we-event-actions {
   top: auto;
   bottom: 7px;
@@ -2301,8 +2367,14 @@
   margin-bottom: 7px;
   position: relative;
 }
-.we-wind-item > .we-event-actions { bottom: 6px; top: auto; }
-.we-wind-item > .we-event-editor + .we-event-actions { bottom: auto; top: 8px; }
+.we-wind-item > .we-event-actions {
+  top: 8px;
+  right: 8px;
+  bottom: auto;
+}
+.we-wind-item > .we-event-editor + .we-event-actions {
+  display: none;
+}
 
 .we-wind-header {
   display: flex;
@@ -2310,6 +2382,7 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 6px;
+  padding-right: 82px;
 }
 
 .we-wind-topic {
@@ -2340,7 +2413,7 @@
 /* 最后一栏（来源）给右下角操作图标让位，文字提前换行。
    用 :has 兄弟选择器精确命中「其后再无 .we-wind-field 的字段」，
    避免 :last-of-type 把末尾的 actions/editor 也算进 div 同类的坑。 */
-.we-wind-item .we-wind-field:not(:has(~ .we-wind-field)) { padding-right: 86px; }
+.we-wind-item .we-wind-field:not(:has(~ .we-wind-field)) { padding-right: 0; }
 /* 编辑态无操作图标，取消让位 */
 .we-wind-item:has(> .we-event-editor) .we-wind-field:not(:has(~ .we-wind-field)) { padding-right: 0; }
 

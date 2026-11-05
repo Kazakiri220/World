@@ -2081,27 +2081,34 @@ window.WORLD_ENGINE_UI = (function() {
     situation: '局势', events: '事件', relations: '关系', resources: '资源', settings: '设置'
   };
 
-  function renderSection(title, id, content) {
-    return '<div class="we-section" id="we-sec-' + id + '"><div class="we-section-title">' + sectionHeader(title, id) + '</div>' + sectionBody(id, content) + '</div>';
+  function renderSection(title, id, content, addBtnLabel, scope) {
+    const addBtn = (addBtnLabel && !id.startsWith('cp-'))
+      ? `<button class="we-btn-mini we-section-add-btn" data-add-section="${id}" data-add-scope="${h(scope || 'state')}" type="button" title="添加${addBtnLabel}"><i class="fa-solid fa-plus"></i> 添加</button>`
+      : '';
+    return '<div class="we-section" id="we-sec-' + id + '"><div class="we-section-title">' + sectionHeader(title, id) + addBtn + '</div>' + sectionBody(id, content) + '</div>';
   }
 
   function renderWorldDigest(s, scope) {
     const isEditing = editingDigest?.scope === scope;
+    const hasDigest = Boolean(s.worldDigest && s.worldDigest.trim());
     const editor = isEditing
       ? '<div class="we-event-editor we-digest-editor" data-digest-scope="' + h(scope) + '">'
         + '<button class="we-event-editor-close we-digest-editor-close" title="取消">✕</button>'
         + '<textarea class="we-digest-edit-text" rows="6">' + h(s.worldDigest || '') + '</textarea>'
         + '<div class="we-event-editor-footer"><button class="we-btn we-btn-primary we-digest-editor-save">保存</button></div>'
         + '</div>'
-      : '<div class="we-digest">' + u(s.worldDigest) + '</div>';
+      : '<div class="we-digest">' + (hasDigest ? u(s.worldDigest) : '<span style="color:var(--we-text3);font-size:12px;">暂无世界摘要</span>') + '</div>';
+
+    const btnLabel = hasDigest ? '编辑' : '添加';
+    const btnIcon = hasDigest ? 'fa-pen' : 'fa-plus';
 
     return '<div class="we-section we-digest-card" id="we-sec-digest">'
-      + '<div class="we-section-title">世界摘要</div>'
+      + '<div class="we-section-title"><span>世界摘要</span>'
+      + '<button class="we-btn-mini we-digest-edit" data-digest-scope="' + h(scope) + '" type="button" title="' + btnLabel + '摘要"><i class="fa-solid ' + btnIcon + '"></i> ' + btnLabel + '</button>'
+      + '</div>'
       + editor
       + renderStoryClock(s, scope)
-      + '<div class="we-event-actions">'
-      + '<button class="we-icon-btn we-digest-edit" data-digest-scope="' + h(scope) + '" title="编辑"><i class="fa-solid fa-pen"></i></button>'
-      + '</div></div>';
+      + '</div>';
   }
 
   function describeTimeSource(value) {
@@ -2112,7 +2119,7 @@ window.WORLD_ENGINE_UI = (function() {
   function renderStoryClock(state, scope) {
     if (!window.WORLD_ENGINE_TIME) return '';
     return `<details class="we-time-annotations" data-time-scope="${h(scope || 'state')}" data-time-path="storyTime">
-      <summary>剧情时间：${h(window.WORLD_ENGINE_TIME.format(state.storyTime))} · 修改</summary>
+      <summary><i class="fa-regular fa-clock" style="margin-right:2px;opacity:0.8;"></i>剧情时间：${h(window.WORLD_ENGINE_TIME.format(state.storyTime))} · 修改</summary>
       <div class="we-time-fields"><label>当前剧情时间<input data-time-field="storyTime" maxlength="160" value="${h(state.storyTime?.text || '')}" placeholder="留空表示未知；支持虚构纪年"></label></div>
       <p class="we-time-source">${h(describeTimeSource(state.storyTime))}</p>
       <p class="we-time-help">填写故事中的时间，保留已知精度。此处修正世界时间标注。</p>
@@ -2129,7 +2136,7 @@ window.WORLD_ENGINE_UI = (function() {
       return `<label title="${h(source)}">${h(api.LABELS[key])}${value?.source === 'inherited' ? '（沿用）' : ''}<input data-time-field="${key}" maxlength="160" value="${h(value?.text || '')}" placeholder="未知"><span class="we-time-source">${h(source)}</span></label>`;
     }).join('');
     return `<details class="we-time-annotations" data-time-scope="${h(scope || 'state')}" data-time-path="${h(path)}"${index == null ? '' : ' data-time-index="' + index + '"'}>
-      <summary>${h(api.brief(item) || '时间：未知')} · 详情／修改</summary>
+      <summary><i class="fa-regular fa-clock" style="margin-right:2px;opacity:0.8;"></i>${h(api.brief(item) || '时间：未知')} · 详情／修改</summary>
       <div class="we-time-fields">${fields}</div>
       <p class="we-time-help">剧情时间；首次记录与实际发生时间分别保存。留空表示未知。</p>
       <button class="we-btn we-time-save">保存时间</button>
@@ -2168,14 +2175,14 @@ window.WORLD_ENGINE_UI = (function() {
   function renderHomeViewExpanded(s, layer, scope) {
     return renderWorldCore(s)
       + renderWorldDigest(s, scope)
-      + renderSection('天下大势', 'trends', renderWorldTrends(s.worldTrends, scope))
+      + renderSection('天下大势', 'trends', renderWorldTrends(s.worldTrends, scope), '大势', scope)
       + renderSection('区域事件', 'regional', renderRegionalIncident(s.regionalIncident, scope))
-      + renderSection('事件链', 'events', renderEventList(s.events, scope))
-      + renderSection('风声', 'winds', renderWindList(s.winds, scope))
-      + renderSection('影响链', 'influence', renderInfluenceChain(s.influenceChain, scope))
+      + renderSection('事件链', 'events', renderEventList(s.events, scope), '事件', scope)
+      + renderSection('风声', 'winds', renderWindList(s.winds, scope), '风声', scope)
+      + renderSection('影响链', 'influence', renderInfluenceChain(s.influenceChain, scope), '影响', scope)
       + renderSection('声誉', 'reputation', renderReputation(s.reputation, scope))
-      + renderSection('势力', 'factions', renderFactionList(s.factions, scope))
-      + renderSection('仇敌录', 'enemies', renderEnemies(s.enemies, scope))
+      + renderSection('势力', 'factions', renderFactionList(s.factions, scope), '势力', scope)
+      + renderSection('仇敌录', 'enemies', renderEnemies(s.enemies, scope), '仇敌', scope)
       + renderSection('经济', 'economy', renderEconomy(s.economy, scope))
       + renderSection('秘密', 'blackbox', renderBlackbox(s.blackbox, scope))
       + renderSection('事件账本', 'ledger', renderLedger(s.memories));
@@ -2184,17 +2191,17 @@ window.WORLD_ENGINE_UI = (function() {
   function renderSubView(viewKey, s, layer, scope) {
     let content = '';
     if (viewKey === 'situation') {
-      content = renderSection('天下大势', 'trends', renderWorldTrends(s.worldTrends, scope))
+      content = renderSection('天下大势', 'trends', renderWorldTrends(s.worldTrends, scope), '大势', scope)
         + renderSection('区域事件', 'regional', renderRegionalIncident(s.regionalIncident, scope))
         + renderSection('事件账本', 'ledger', renderLedger(s.memories));
     } else if (viewKey === 'events') {
-      content = renderSection('事件链', 'events', renderEventList(s.events, scope))
-        + renderSection('风声', 'winds', renderWindList(s.winds, scope))
-        + renderSection('影响链', 'influence', renderInfluenceChain(s.influenceChain, scope));
+      content = renderSection('事件链', 'events', renderEventList(s.events, scope), '事件', scope)
+        + renderSection('风声', 'winds', renderWindList(s.winds, scope), '风声', scope)
+        + renderSection('影响链', 'influence', renderInfluenceChain(s.influenceChain, scope), '影响', scope);
     } else if (viewKey === 'relations') {
       content = renderSection('声誉', 'reputation', renderReputation(s.reputation, scope))
-        + renderSection('势力', 'factions', renderFactionList(s.factions, scope))
-        + renderSection('仇敌录', 'enemies', renderEnemies(s.enemies, scope));
+        + renderSection('势力', 'factions', renderFactionList(s.factions, scope), '势力', scope)
+        + renderSection('仇敌录', 'enemies', renderEnemies(s.enemies, scope), '仇敌', scope);
     } else if (viewKey === 'resources') {
       content = renderSection('经济', 'economy', renderEconomy(s.economy, scope))
         + renderSection('秘密', 'blackbox', renderBlackbox(s.blackbox, scope));
@@ -2524,9 +2531,12 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderEventList(events, scope) {
-    if (!events || !events.length) return '<div class="we-empty">暂无事件链</div>';
+    const list = Array.isArray(events) ? events : [];
+    const isNew = editingEvent && editingEvent.scope === scope && editingEvent.index === -1;
+    const newEditorHtml = isNew ? `<div class="we-event-item" style="border-left: 3px solid var(--we-accent);">${renderEventEditor({}, scope, -1)}</div>` : '';
+    if (!list.length && !isNew) return '<div class="we-empty">暂无事件链</div>';
     const curRound = (core.loadState() || {}).round || 0;
-    return renderPagedList(events, 'events-' + scope, (e, eventIndex) => {
+    const pagedContent = list.length ? renderPagedList(list, 'events-' + scope, (e, eventIndex) => {
       const stageColors = {
         萌芽:'#d6b85a',
         发酵:'#d98a3d',
@@ -2634,24 +2644,29 @@ window.WORLD_ENGINE_UI = (function() {
         ${actionHtml}
         ${progressHtml}
       </div>`;
-    });
+    }) : '';
+    return newEditorHtml + pagedContent;
   }
 
   function renderEventEditor(event, scope, eventIndex) {
-    const stages = event.type === 'progress'
+    event = event || {};
+    const curType = event.type || 'conflict';
+    const stages = curType === 'progress'
       ? ['筹备', '执行', '关键', '已完成', '已失败']
       : ['萌芽', '发酵', '逼近', '已爆发', '已消散'];
+    const curLevel = Number(event.level) || 1;
     const levelOptions = [1, 2, 3, 4].map(level =>
-      `<option value="${level}" ${Number(event.level) === level ? 'selected' : ''}>Lv.${level}</option>`
+      `<option value="${level}" ${curLevel === level ? 'selected' : ''}>Lv.${level}</option>`
     ).join('');
     const typeOptions = [
       ['conflict', '冲突型'],
       ['progress', '推进型']
     ].map(([type, label]) =>
-      `<option value="${type}" ${event.type === type ? 'selected' : ''}>${label}</option>`
+      `<option value="${type}" ${curType === type ? 'selected' : ''}>${label}</option>`
     ).join('');
+    const curStage = event.stage || stages[0];
     const stageOptions = stages.map(stage =>
-      `<option value="${stage}" ${event.stage === stage ? 'selected' : ''}>${stage}</option>`
+      `<option value="${stage}" ${curStage === stage ? 'selected' : ''}>${stage}</option>`
     ).join('');
 
     // 正面终局倒计时：默认值取当前剩余，非终局事件留空
@@ -2685,8 +2700,11 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderFactionList(factions, scope) {
-    if (!factions || !factions.length) return '<div class="we-empty">暂无势力</div>';
-    return renderPagedList(factions, 'factions', (f, factionIndex) => {
+    const list = Array.isArray(factions) ? factions : [];
+    const isNew = editingFaction && editingFaction.scope === scope && editingFaction.index === -1;
+    const newEditorHtml = isNew ? `<div class="we-faction-item" style="border-left: 3px solid var(--we-accent);">${renderFactionEditor({}, -1, scope)}</div>` : '';
+    if (!list.length && !isNew) return '<div class="we-empty">暂无势力</div>';
+    const pagedContent = list.length ? renderPagedList(list, 'factions', (f, factionIndex) => {
       const relationColors = {
         血盟:'#2563eb', 盟友:'#0ea5e9', 友好:'#06b6d4', 中立:'#94a3b8',
         冷淡:'#f59e0b', 紧张:'#f59e0b', 敌对:'#ef4444', 世仇:'#991b1b'
@@ -2724,14 +2742,18 @@ window.WORLD_ENGINE_UI = (function() {
         ${actionHtml}
         ${editHtml}
       </div>`;
-    });
+    }) : '';
+    return newEditorHtml + pagedContent;
   }
 
   function renderFactionEditor(f, index, scope) {
+    f = f || {};
+    const curStatus = f.status || '稳固';
+    const curRelation = f.relation || '中立';
     const statusOptions = ['鼎盛','稳固','倾轧','困顿','衰落','瓦解'].map(s =>
-      `<option value="${s}" ${f.status === s ? 'selected' : ''}>${s}</option>`).join('');
+      `<option value="${s}" ${curStatus === s ? 'selected' : ''}>${s}</option>`).join('');
     const relationOptions = ['血盟','盟友','友好','中立','冷淡','敌对','世仇'].map(r =>
-      `<option value="${r}" ${f.relation === r ? 'selected' : ''}>${r}</option>`).join('');
+      `<option value="${r}" ${curRelation === r ? 'selected' : ''}>${r}</option>`).join('');
     const pillars = [];
     for (let i = 0; i < 3; i++) pillars.push(f.powerPillars?.[i] || '');
 
@@ -2754,8 +2776,11 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderWorldTrends(trends, scope) {
-    if (!trends || !trends.length) return '<div class="we-empty">暂无天下大势</div>';
-    return renderPagedList(trends, 'world-trends', (trend, trendIndex) => {
+    const list = Array.isArray(trends) ? trends : [];
+    const isNew = editingTrend && editingTrend.scope === scope && editingTrend.index === -1;
+    const newEditorHtml = isNew ? `<div class="we-trend-item" style="border-left-color:var(--we-accent);">${renderTrendEditor({}, scope, -1)}</div>` : '';
+    if (!list.length && !isNew) return '<div class="we-empty">暂无天下大势</div>';
+    const pagedContent = list.length ? renderPagedList(list, 'world-trends', (trend, trendIndex) => {
       const ended = trend.status === '已结束';
       const color = ended ? '#888888' : '#c9a45c';
       const isEditing = editingTrend?.scope === scope && editingTrend?.index === trendIndex;
@@ -2778,12 +2803,15 @@ window.WORLD_ENGINE_UI = (function() {
         ${renderTimeInfo(trend, scope, 'worldTrends', trendIndex)}
         ${editHtml}
       </div>`;
-    });
+    }) : '';
+    return newEditorHtml + pagedContent;
   }
 
   function renderTrendEditor(trend, scope, index) {
+    trend = trend || {};
+    const curStatus = trend.status || '持续中';
     const statusOptions = ['持续中', '已结束'].map(s =>
-      `<option value="${s}" ${trend.status === s ? 'selected' : ''}>${s}</option>`).join('');
+      `<option value="${s}" ${curStatus === s ? 'selected' : ''}>${s}</option>`).join('');
     return `
       <div class="we-event-editor" data-trend-scope="${scope}" data-trend-index="${index}">
         <button class="we-event-editor-close we-trend-editor-close"><i class="fa-solid fa-xmark"></i></button>
@@ -2801,10 +2829,13 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderWindList(winds, scope) {
-    if (!winds || !winds.length) return '<div class="we-empty">暂无风声</div>';
+    const list = Array.isArray(winds) ? winds : [];
+    const isNew = editingWind && editingWind.scope === scope && editingWind.index === -1;
+    const newEditorHtml = isNew ? `<div class="we-wind-item" style="border-left: 3px solid var(--we-accent);">${renderWindEditor({}, -1, scope)}</div>` : '';
+    if (!list.length && !isNew) return '<div class="we-empty">暂无风声</div>';
     const typeNames = { announcement:'公告', report:'消息', rumor:'流言', sentiment:'舆情' };
     const typeColors = { announcement:'#c94b4b', report:'#4a8ab5', rumor:'#9178a0', sentiment:'#c17a35' };
-    return renderPagedList(winds, 'winds', (w, windIndex) => {
+    const pagedContent = list.length ? renderPagedList(list, 'winds', (w, windIndex) => {
       const typeColor = typeColors[w.type] || '#888';
       // 等级徽章：Lv1/2 中性灰，Lv3/4 取类型本色（与风声四态配色统一）
       const levelColor = (w.level >= 3) ? typeColor : (w.level === 2 ? '#7a828c' : '#5a6270');
@@ -2842,14 +2873,18 @@ window.WORLD_ENGINE_UI = (function() {
       html += actionHtml;
       html += '</div>';
       return html;
-    });
+    }) : '';
+    return newEditorHtml + pagedContent;
   }
 
   function renderWindEditor(w, index, scope) {
+    w = w || {};
+    const curType = w.type || 'rumor';
+    const curLevel = Number(w.level) || 1;
     const typeOptions = [['announcement','公告'],['report','消息'],['rumor','流言'],['sentiment','舆情']].map(([v,label]) =>
-      `<option value="${v}" ${w.type === v ? 'selected' : ''}>${label}</option>`).join('');
+      `<option value="${v}" ${curType === v ? 'selected' : ''}>${label}</option>`).join('');
     const levelOptions = [1,2,3,4].map(l =>
-      `<option value="${l}" ${w.level === l ? 'selected' : ''}>Lv.${l}</option>`).join('');
+      `<option value="${l}" ${curLevel === l ? 'selected' : ''}>Lv.${l}</option>`).join('');
 
     return `
       <div class="we-event-editor" data-wind-index="${index}" data-wind-scope="${scope}">
@@ -2933,8 +2968,11 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderEnemies(enemiesList, scope) {
-    if (!enemiesList || !enemiesList.length) return '<div class="we-empty">暂无仇敌</div>';
-    return renderPagedList(enemiesList, 'enemies', (en, enemyIndex) => {
+    const list = Array.isArray(enemiesList) ? enemiesList : [];
+    const isNew = editingEnemy && editingEnemy.scope === scope && editingEnemy.index === -1;
+    const newEditorHtml = isNew ? `<div class="we-enemy-item" style="border-left: 3px solid var(--we-accent);">${renderEnemyEditor({}, -1, scope)}</div>` : '';
+    if (!list.length && !isNew) return '<div class="we-empty">暂无仇敌</div>';
+    const pagedContent = list.length ? renderPagedList(list, 'enemies', (en, enemyIndex) => {
       const isEditing = editingEnemy?.scope === scope && editingEnemy?.index === enemyIndex;
       const actionHtml = isEditing ? '' : `
         <div class="we-event-actions">
@@ -2950,14 +2988,18 @@ window.WORLD_ENGINE_UI = (function() {
         ${renderTimeInfo(en, scope, 'enemies', enemyIndex)}
         ${editHtml}
       </div>`;
-    });
+    }) : '';
+    return newEditorHtml + pagedContent;
   }
 
   function renderEnemyEditor(en, index, scope) {
+    en = en || {};
+    const curType = en.type || 'blood';
+    const curStatus = en.status || '追踪中';
     const typeOptions = [['blood','血仇'],['grudge','恩怨']].map(([v,label]) =>
-      `<option value="${v}" ${en.type === v ? 'selected' : ''}>${label}</option>`).join('');
+      `<option value="${v}" ${curType === v ? 'selected' : ''}>${label}</option>`).join('');
     const statusOptions = ['追踪中','策划中','执行中','已终结'].map(s =>
-      `<option value="${s}" ${en.status === s ? 'selected' : ''}>${s}</option>`).join('');
+      `<option value="${s}" ${curStatus === s ? 'selected' : ''}>${s}</option>`).join('');
     return `
       <div class="we-event-editor" data-enemy-scope="${scope}" data-enemy-index="${index}">
         <button class="we-event-editor-close we-enemy-editor-close"><i class="fa-solid fa-xmark"></i></button>
@@ -2974,8 +3016,11 @@ window.WORLD_ENGINE_UI = (function() {
   }
 
   function renderInfluenceChain(chain, scope) {
-    if (!chain || !chain.length) return '<div class="we-empty">暂无影响链</div>';
-    return renderPagedList(chain, 'influence', (item, infIndex) => {
+    const list = Array.isArray(chain) ? chain : [];
+    const isNew = editingInfluence && editingInfluence.scope === scope && editingInfluence.index === -1;
+    const newEditorHtml = isNew ? `<div class="we-influence-item" style="border-left: 3px solid var(--we-accent);">${renderInfluenceEditor({}, -1, scope)}</div>` : '';
+    if (!list.length && !isNew) return '<div class="we-empty">暂无影响链</div>';
+    const pagedContent = list.length ? renderPagedList(list, 'influence', (item, infIndex) => {
       const isEditing = editingInfluence?.scope === scope && editingInfluence?.index === infIndex;
       const actionHtml = isEditing ? '' : `
         <div class="we-event-actions">
@@ -3001,7 +3046,8 @@ window.WORLD_ENGINE_UI = (function() {
         </div>` : ''}
         ${editHtml}
       </div>`;
-    });
+    }) : '';
+    return newEditorHtml + pagedContent;
   }
 
   function renderInfluenceEditor(item, index, scope) {
@@ -4608,6 +4654,30 @@ window.WORLD_ENGINE_UI = (function() {
       };
     });
 
+    document.querySelectorAll('.we-section-add-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const secId = btn.dataset.addSection;
+        const scope = btn.dataset.addScope || 'state';
+        sectionCollapsed[secId] = false;
+
+        if (secId === 'trends') {
+          editingTrend = { scope, index: -1 };
+        } else if (secId === 'events') {
+          editingEvent = { scope, index: -1 };
+        } else if (secId === 'winds') {
+          editingWind = { scope, index: -1 };
+        } else if (secId === 'factions') {
+          editingFaction = { scope, index: -1 };
+        } else if (secId === 'enemies') {
+          editingEnemy = { scope, index: -1 };
+        } else if (secId === 'influence') {
+          editingInfluence = { scope, index: -1 };
+        }
+        refresh();
+      };
+    });
+
     document.querySelectorAll('.we-event-edit').forEach(button => {
       button.onclick = () => {
         editingEvent = {
@@ -4641,17 +4711,19 @@ window.WORLD_ENGINE_UI = (function() {
         const scope = editor.dataset.eventScope;
         const index = Number(editor.dataset.eventIndex);
         const scopedState = loadScopedState(scope);
-        const event = scopedState?.events?.[index];
-        if (!event) return;
+        if (!scopedState) return;
+        if (!Array.isArray(scopedState.events)) scopedState.events = [];
+        const isNew = index === -1 || !scopedState.events[index];
 
         const name = editor.querySelector('.we-event-edit-name').value.trim();
         if (!name) {
           showToast('事件名字不能为空', true);
           return;
         }
+        const event = isNew ? { time: {} } : scopedState.events[index];
         event.name = name;
-        event.level = Number(editor.querySelector('.we-event-edit-level').value);
-        event.type = editor.querySelector('.we-event-edit-type').value;
+        event.level = Number(editor.querySelector('.we-event-edit-level').value) || 1;
+        event.type = editor.querySelector('.we-event-edit-type').value || 'conflict';
         event.stage = editor.querySelector('.we-event-edit-stage').value;
         event.stageRound = Math.min(9, Math.max(1, Number(editor.querySelector('.we-event-edit-round').value) || 1));
         event.desc = editor.querySelector('.we-event-edit-desc').value.trim();
@@ -4670,9 +4742,13 @@ window.WORLD_ENGINE_UI = (function() {
           delete event._terminalSince;
         }
         core.ensureEventFields(event);
+        if (isNew) {
+          core.assignEntityId(scopedState.events, event, core.ENTITY_ID_PREFIXES.events);
+          scopedState.events.unshift(event);
+        }
         saveScopedState(scope, scopedState);
         editingEvent = null;
-        showToast('事件修改已保存');
+        showToast(isNew ? '事件已添加' : '事件修改已保存');
         refresh();
       };
     });
@@ -4693,10 +4769,12 @@ window.WORLD_ENGINE_UI = (function() {
         const scope = editor.dataset.factionScope;
         const index = Number(editor.dataset.factionIndex);
         const state = loadScopedState(scope);
-        const faction = state.factions?.[index];
-        if (!faction) return;
+        if (!state) return;
+        if (!Array.isArray(state.factions)) state.factions = [];
+        const isNew = index === -1 || !state.factions[index];
         const name = editor.querySelector('.we-faction-edit-name').value.trim();
         if (!name) { showToast('势力名称不能为空', true); return; }
+        const faction = isNew ? { time: {} } : state.factions[index];
         faction.name = name;
         faction.status = editor.querySelector('.we-faction-edit-status').value;
         faction.relation = editor.querySelector('.we-faction-edit-relation').value;
@@ -4709,9 +4787,13 @@ window.WORLD_ENGINE_UI = (function() {
           if (v) pillars.push(v);
         });
         faction.powerPillars = pillars;
+        if (isNew) {
+          core.assignEntityId(state.factions, faction, core.ENTITY_ID_PREFIXES.factions);
+          state.factions.unshift(faction);
+        }
         saveScopedState(scope, state);
         editingFaction = null;
-        showToast('势力修改已保存');
+        showToast(isNew ? '势力已添加' : '势力修改已保存');
         refresh();
       };
     });
@@ -4761,20 +4843,26 @@ window.WORLD_ENGINE_UI = (function() {
         const scope = editor.dataset.windScope;
         const index = Number(editor.dataset.windIndex);
         const scopedState = loadScopedState(scope);
-        const wind = scopedState.winds?.[index];
-        if (!wind) return;
+        if (!scopedState) return;
+        if (!Array.isArray(scopedState.winds)) scopedState.winds = [];
+        const isNew = index === -1 || !scopedState.winds[index];
         const topic = editor.querySelector('.we-wind-edit-topic').value.trim();
         if (!topic) { showToast('风声主题不能为空', true); return; }
+        const wind = isNew ? { time: {} } : scopedState.winds[index];
         wind.topic = topic;
-        wind.type = editor.querySelector('.we-wind-edit-type').value;
-        wind.level = Number(editor.querySelector('.we-wind-edit-level').value);
+        wind.type = editor.querySelector('.we-wind-edit-type').value || 'rumor';
+        wind.level = Number(editor.querySelector('.we-wind-edit-level').value) || 1;
         wind.scope = editor.querySelector('.we-wind-edit-scope').value.trim();
         wind.source = editor.querySelector('.we-wind-edit-source').value.trim();
         wind.content = editor.querySelector('.we-wind-edit-content').value.trim();
         wind.quietRounds = 0;
+        if (isNew) {
+          core.assignEntityId(scopedState.winds, wind, core.ENTITY_ID_PREFIXES.winds);
+          scopedState.winds.unshift(wind);
+        }
         saveScopedState(scope, scopedState);
         editingWind = null;
-        showToast('风声修改已保存');
+        showToast(isNew ? '风声已添加' : '风声修改已保存');
         refresh();
       };
     });
@@ -4825,18 +4913,24 @@ window.WORLD_ENGINE_UI = (function() {
         const scope = editor.dataset.trendScope;
         const index = Number(editor.dataset.trendIndex);
         const scopedState = loadScopedState(scope);
-        const trend = scopedState?.worldTrends?.[index];
-        if (!trend) return;
+        if (!scopedState) return;
+        if (!Array.isArray(scopedState.worldTrends)) scopedState.worldTrends = [];
+        const isNew = index === -1 || !scopedState.worldTrends[index];
         const name = editor.querySelector('.we-trend-edit-name').value.trim();
         if (!name) { showToast('大势名称不能为空', true); return; }
+        const trend = isNew ? { time: {} } : scopedState.worldTrends[index];
         trend.name = name;
         trend.status = editor.querySelector('.we-trend-edit-status').value;
         trend.scope = editor.querySelector('.we-trend-edit-scope').value.trim();
         trend.source = editor.querySelector('.we-trend-edit-source').value.trim();
         trend.description = editor.querySelector('.we-trend-edit-desc').value.trim();
+        if (isNew) {
+          core.assignEntityId(scopedState.worldTrends, trend, core.ENTITY_ID_PREFIXES.worldTrends);
+          scopedState.worldTrends.unshift(trend);
+        }
         saveScopedState(scope, scopedState);
         editingTrend = null;
-        showToast('天下大势修改已保存');
+        showToast(isNew ? '天下大势已添加' : '天下大势修改已保存');
         refresh();
       };
     });
@@ -4886,17 +4980,23 @@ window.WORLD_ENGINE_UI = (function() {
         const scope = editor.dataset.enemyScope;
         const index = Number(editor.dataset.enemyIndex);
         const state = loadScopedState(scope);
-        const enemy = state.enemies?.[index];
-        if (!enemy) return;
+        if (!state) return;
+        if (!Array.isArray(state.enemies)) state.enemies = [];
+        const isNew = index === -1 || !state.enemies[index];
         const name = editor.querySelector('.we-enemy-edit-name').value.trim();
         if (!name) { showToast('仇敌名称不能为空', true); return; }
+        const enemy = isNew ? { time: {} } : state.enemies[index];
         enemy.name = name;
-        enemy.type = editor.querySelector('.we-enemy-edit-type').value;
-        enemy.status = editor.querySelector('.we-enemy-edit-status').value;
+        enemy.type = editor.querySelector('.we-enemy-edit-type').value || 'blood';
+        enemy.status = editor.querySelector('.we-enemy-edit-status').value || '追踪中';
         enemy.reason = editor.querySelector('.we-enemy-edit-reason').value.trim();
+        if (isNew) {
+          core.assignEntityId(state.enemies, enemy, core.ENTITY_ID_PREFIXES.enemies);
+          state.enemies.unshift(enemy);
+        }
         saveScopedState(scope, state);
         editingEnemy = null;
-        showToast('仇敌修改已保存');
+        showToast(isNew ? '仇敌已添加' : '仇敌修改已保存');
         refresh();
       };
     });
@@ -4946,17 +5046,22 @@ window.WORLD_ENGINE_UI = (function() {
         const scope = editor.dataset.influenceScope;
         const index = Number(editor.dataset.influenceIndex);
         const scopedState = loadScopedState(scope);
-        const inf = scopedState.influenceChain?.[index];
-        if (!inf) return;
+        if (!scopedState) return;
+        if (!Array.isArray(scopedState.influenceChain)) scopedState.influenceChain = [];
+        const isNew = index === -1 || !scopedState.influenceChain[index];
         const trigger = editor.querySelector('.we-influence-edit-trigger').value.trim();
         const impact = editor.querySelector('.we-influence-edit-impact').value.trim();
         if (!trigger || !impact) { showToast('触发源和直接影响不能为空', true); return; }
+        const inf = isNew ? { time: {} } : scopedState.influenceChain[index];
         inf.trigger = trigger;
         inf.impact = impact;
         inf.fallout = editor.querySelector('.we-influence-edit-fallout').value.trim();
+        if (isNew) {
+          scopedState.influenceChain.unshift(inf);
+        }
         saveScopedState(scope, scopedState);
         editingInfluence = null;
-        showToast('影响链修改已保存');
+        showToast(isNew ? '影响链已添加' : '影响链修改已保存');
         refresh();
       };
     });
