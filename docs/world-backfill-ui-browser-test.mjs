@@ -62,7 +62,8 @@ try {
   };
   const release = () => page.evaluate(() => fixture.pending.shift()());
   async function switchFace() {
-    await page.evaluate(() => document.querySelector('.we-engine-face-toggle').click());
+    await page.evaluate(() => document.querySelector(document.getElementById('we-panel').classList.contains('we-memory-face')
+      ? '.we-engine-tab-world' : '.we-engine-tab-memory').click());
     await page.waitForFunction(() => !document.getElementById('we-panel').classList.contains('we-panel-flip-out'));
     await page.waitForFunction(() => !document.getElementById('we-panel').getAnimations().some(a => a.playState === 'running'));
     // 翻面还有内部 220ms 防重复操作窗口，等待该窗口结束再点击下一次。

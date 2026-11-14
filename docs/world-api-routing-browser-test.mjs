@@ -66,6 +66,14 @@ try {
     await page.waitForSelector('#we-api-pool-trigger');
     assert.equal(await page.$eval('#we-api-pool-menu', el => el.hidden), true);
     await page.click('#we-api-pool-trigger');
+    if (await page.$eval('#we-api-pool-trigger', el => el.getAttribute('aria-expanded')) !== 'true') {
+      console.error(await page.$eval('#we-api-pool-trigger', el => {
+        const r = el.getBoundingClientRect();
+        return { scope: el.closest('[data-api-scope]')?.dataset.apiScope, rect: r.toJSON(),
+          atPoint: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.outerHTML,
+          scroll: document.getElementById('we-panel-body').scrollTop };
+      }));
+    }
     assert.equal(await page.$eval('#we-api-pool-trigger', el => el.getAttribute('aria-expanded')), 'true');
     assert.equal(await page.$eval('#we-api-pool-menu', el => el.scrollHeight > el.clientHeight), true);
     await page.evaluate(() => {
@@ -139,7 +147,7 @@ try {
     console.log('✓ ' + scope + ': 连续多选、稳定 DOM、键盘及实际保存；原请求在保存 RPM=0 后恢复通过');
   }
   await exercise('world');
-  await page.click('.we-engine-face-toggle');
+  await page.click('.we-engine-tab-memory');
   await page.waitForFunction(() => document.getElementById('we-panel').classList.contains('we-memory-face')
     && !document.getElementById('we-panel').classList.contains('we-panel-flip-in'));
   await page.waitForFunction(() => !document.getElementById('we-panel').getAnimations().some(animation => animation.playState === 'running'));

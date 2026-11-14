@@ -407,7 +407,8 @@
         const chat = ctx?.chat || [];
         const lastMsg = chat[chat.length - 1];
         const aiMsg = !lastMsg?.is_user ? (lastMsg?.mes || '').trim() : '';
-        if (!ctx || chat.length <= 2 || !lastMsg || lastMsg.is_user || !aiMsg) return;
+        if (!ctx || !lastMsg || lastMsg.is_user || lastMsg.is_system || !aiMsg) return;
+        if (chat.length === 1 && api.getSettings(true).firstLayerIsAiOpening !== false) return;
 
         const messageKey = getMessageKey(ctx, chat, lastMsg);
         autoEvolveTimer = setTimeout(
@@ -428,7 +429,7 @@
         const chat = ctx?.chat || [];
         const lastMsg = chat[chat.length - 1];
         const aiMsg = !lastMsg?.is_user ? (lastMsg?.mes || '').trim() : '';
-        if (!ctx || !lastMsg || lastMsg.is_user || !aiMsg) return;
+        if (!ctx || !lastMsg || lastMsg.is_user || lastMsg.is_system || !aiMsg) return;
 
         const currentKey = getMessageKey(ctx, chat, lastMsg);
         if (currentKey !== expectedKey) return;
@@ -488,27 +489,26 @@
           timeReadRounds = Math.max(1, Math.min(since, Xmax));
         } else {
           const L = core.getChatLayer();
-          const cp = core.restoreCheckpoint();
           const storedState = core.hasState() ? core.loadState() : null;
           let anchor = null;
-          if (cp && cp.chatLayer != null) {
-            anchor = Number(cp.chatLayer);
-          } else if (storedState && storedState.chatLayer != null && Number.isFinite(Number(storedState.chatLayer))) {
+          // 新回复从最近成功更新的位置计数。checkpoint 属于上一轮基底，优先使用它会
+          // 重复计算已经处理过的回复；失败/停用后积累的回复也应在达到 X 时继续处理。
+          if (storedState && storedState.chatLayer != null && Number.isFinite(Number(storedState.chatLayer))) {
             anchor = Number(storedState.chatLayer);
           } else if (core.loadFingerprint() !== '') {
             anchor = Number(core.loadFingerprint());
           }
-          // [FIX] 三级回退全空 = 该聊天从未推演过（空壳 state + 无存档点 + 无指纹）。
-          //   旧逻辑兜底 anchor=L 导致 c=0 永久死锁（见 onChatLoaded 对空壳 state 不再钉 chatLayer 的配套改动）；
-          //   改为认定从未推演，anchor=-1 让 c>0 触发首次推演。推演成功后 evolution 正常写 fingerprint，后续轮次走正常锚点。
+          // 没有状态楼层或指纹说明从未更新，从聊天起点计数，避免把当前楼当锚点而永远等不到首推演。
           if (!Number.isFinite(anchor)) anchor = -1;
-          const c = Math.floor(Math.max(0, L - anchor) / 2);
-          const doEvolve = c > 0 && c % everyX === 0;
+          const c = chat.reduce((count, message, index) => count + (
+            index > anchor && index <= L && !(index === 0 && settings.firstLayerIsAiOpening !== false)
+            && message && !message.is_user && !message.is_system && String(message.mes || '').trim() ? 1 : 0
+          ), 0);
+          const doEvolve = c >= everyX;
 
           if (!doEvolve) {
             lastProcessedMessageKey = currentKey;
-            const pos = c % everyX || (c === 0 ? 0 : everyX);
-            setStatus(`第 ${pos}/${everyX} 轮，未到推演`);
+            setStatus(`第 ${c}/${everyX} 轮，未到推演`);
             if (ui) ui.refresh(true);
             return;
           }
@@ -767,8 +767,10 @@
       //   dryRun（数据库类插件的预热/算 token 生成）→ 不动注入，避免「生成完又注入一遍」。
       function onGenerationStarted(type, _opts, dryRun) {
         if (dryRun) return; // 预热轮不重判注入
+        clearAutoEvolveTimer();
         if (api.getSettings(true).engineEnabled === false) { unregisterInjection(); return; }
         const isReroll = (type === 'swipe' || type === 'regenerate');
+        if (isReroll) lastProcessedMessageKey = '';
         const history = window.WORLD_ENGINE_HISTORY;
         history?.invalidateRequests?.();
         if (evolution.isRunning()) evolution.abort();

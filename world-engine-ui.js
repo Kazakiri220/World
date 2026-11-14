@@ -347,32 +347,17 @@ window.WORLD_ENGINE_UI = (function() {
             <span class="we-header-round" id="we-header-round"></span>
           </div>
           <div class="we-header-status-right">
+            <button class="we-header-mode" id="we-header-mode" type="button" title="查看推演设置"></button>
             <span class="we-header-story-time" id="we-header-story-time"></span>
             <span class="we-panel-version" id="we-panel-version"></span>
           </div>
-        </div>
-        <div style="display:none;" aria-hidden="true">
-        <div class="we-header-info">
-          <div class="we-header-top">
-            <button class="we-panel-title we-engine-face-toggle" type="button" title="切换到记忆引擎" aria-label="切换到记忆引擎">世界引擎</button>
-            <span class="we-panel-version" id="we-panel-version-old"></span><!-- [FIX] 版本号 -->
-            <span class="we-header-round" id="we-header-round-old"></span>
-            <span class="we-header-story-time" id="we-header-story-time-old"></span>
-          </div>
-          <div class="we-header-mood" id="we-header-mood-old">
-            <span class="we-header-dot"></span>
-            <span class="we-header-mood-text"></span>
-          </div>
-        </div>
-        <div class="we-panel-corner-actions">
-          <button class="we-panel-close">✕</button>
-          <button class="we-panel-settings" id="we-btn-settings-open-old" title="设置"><i class="fa-solid fa-gear"></i></button></div><!-- close display:none -->
         </div>
       </div>
       <div class="we-category-chips-bar" id="we-category-chips-bar"></div>
       <div class="we-panel-body" id="we-panel-body">
         <div class="we-loading">加载中...</div>
       </div>
+      <div class="we-settings-footer" id="we-settings-footer" hidden></div>
       <div class="we-quick-action-bar" id="we-quick-action-bar">
       </div>
     `;
@@ -398,9 +383,16 @@ window.WORLD_ENGINE_UI = (function() {
         if (faceId) switchEngineFace(faceId);
       };
     });
-    panel.querySelector('.we-engine-face-toggle').onclick = (event) => {
-      event.stopPropagation();
-      advanceEngineFace();
+    panel.querySelector('#we-header-mode').onclick = () => {
+      if (getEngineFace().id === 'memory') {
+        _memorySettingsOpen = true;
+        _memorySettingsTab = 'evolve';
+      } else {
+        clearWorldEditing();
+        _currentView = 'settings';
+        _settingsTab = 'evolve';
+      }
+      refresh();
     };
     initDrag(panel, panel.querySelector('.we-panel-header'));
 
@@ -1628,9 +1620,22 @@ window.WORLD_ENGINE_UI = (function() {
     const memoryTab = panelElement.querySelector('.we-engine-tab-memory');
     if (worldTab) worldTab.classList.toggle('is-active', face.id === 'world');
     if (memoryTab) memoryTab.classList.toggle('is-active', face.id === 'memory');
+    [worldTab, memoryTab].forEach(tab => {
+      if (tab) tab.setAttribute('aria-selected', String(tab.dataset.targetFace === face.id));
+    });
+    const faceSettings = callEngineFace(face, 'getSettings', {}) || {};
+    const mode = panelElement.querySelector('#we-header-mode');
+    if (mode) {
+      mode.textContent = faceSettings.engineEnabled === false ? '引擎已关闭'
+        : faceSettings.evolveMode === 'manual' ? '手动推演'
+        : faceSettings.evolveMode === 'time' ? '自动 · 按时间'
+        : face.id === 'world' ? `自动 · 每 ${Math.max(1, parseInt(faceSettings.evolveEveryX) || 1)} 轮` : '自动 · 每轮提取';
+      mode.classList.toggle('is-paused', faceSettings.engineEnabled === false || faceSettings.evolveMode === 'manual');
+    }
     const settings = panelElement.querySelector('#we-btn-settings-open');
     if (settings) {
-      settings.classList.toggle('is-active', Boolean(callEngineFace(face, 'isSettingsOpen', false)));
+      settings.classList.toggle('is-active', face.id === 'world' ? _currentView === 'settings'
+        : Boolean(callEngineFace(face, 'isSettingsOpen', false)));
       settings.title = face.label + '设置';
     }
     const version = panelElement.querySelector('#we-panel-version');
@@ -1684,45 +1689,55 @@ window.WORLD_ENGINE_UI = (function() {
     const chips = isWorld ? WORLD_CHIPS : MEMORY_CHIPS;
     const activeView = isWorld ? _currentView : _memoryView;
 
-    chipsBar.innerHTML = chips.map(c => `
-      <button class="we-chip-btn ${c.id === activeView ? 'is-active' : ''}" data-view="${c.id}" type="button">
-        <i class="fa-solid ${c.icon}"></i> ${c.label}
-      </button>
-    `).join('');
+    const chipsKey = face.id + ':' + activeView;
+    if (chipsBar.dataset.viewKey !== chipsKey) {
+      chipsBar.dataset.viewKey = chipsKey;
+      chipsBar.innerHTML = chips.map(c => `
+        <button class="we-chip-btn ${c.id === activeView ? 'is-active' : ''}" data-view="${c.id}" type="button">
+          <i class="fa-solid ${c.icon}"></i> ${c.label}
+        </button>
+      `).join('');
 
-    chipsBar.querySelectorAll('.we-chip-btn').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const targetView = btn.dataset.view;
-        if (isWorld) {
-          if (_currentView !== targetView) {
-            _currentView = targetView;
-            _selectedNavView = targetView === 'home' ? null : targetView;
-            refresh();
+      chipsBar.querySelectorAll('.we-chip-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const targetView = btn.dataset.view;
+          if (isWorld) {
+            if (_currentView !== targetView) {
+              clearWorldEditing();
+              _currentView = targetView;
+              _selectedNavView = null;
+              refresh();
+            }
+          } else {
+            if (_memoryView !== targetView) {
+              clearMemoryEditing();
+              _memoryView = targetView;
+              _memorySelectedNavView = null;
+              refresh();
+            }
           }
-        } else {
-          if (_memoryView !== targetView) {
-            clearMemoryEditing();
-            _memoryView = targetView;
-            _memorySelectedNavView = targetView === 'home' ? null : targetView;
-            refresh();
-          }
-        }
-      };
-    });
+        };
+      });
+    }
 
     // 2. 底部快捷操作栏 (Phase 4)
     const isRunning = Boolean(callEngineFace(face, 'isRunning', false));
+    const faceSettings = callEngineFace(face, 'getSettings', {}) || {};
+    const canRedo = isWorld && Boolean(core.restoreCheckpoint());
+    const actionsKey = [face.id, isRunning, faceSettings.injectIntoPrompt !== false, faceSettings.engineEnabled !== false, canRedo].join(':');
+    if (actionBar.dataset.actionsKey === actionsKey) return;
+    actionBar.dataset.actionsKey = actionsKey;
     if (isWorld) {
       const worldSettings = window.WORLD_ENGINE_API?.getSettings?.(true) || {};
       const injectOn = worldSettings.injectIntoPrompt !== false;
       const mainBtnHtml = isRunning
         ? `<button class="act-btn-main act-btn-abort" id="we-quick-btn-abort" type="button" title="停止推演"><i class="fa-solid fa-stop"></i> 停止推演</button>`
-        : `<button class="act-btn-main" id="we-quick-btn-forward" type="button" title="执行手动单步推演"><i class="fa-solid fa-play"></i> 立即推演</button>`;
+        : `<button class="act-btn-main" id="we-quick-btn-forward" type="button" ${faceSettings.engineEnabled === false ? 'disabled' : ''} title="执行手动单步推演"><i class="fa-solid fa-play"></i> 立即推演</button>`;
 
       actionBar.innerHTML = `
         ${mainBtnHtml}
-        <button class="act-btn-sub" id="we-quick-btn-redo" type="button" title="重演当前轮次"><i class="fa-solid fa-rotate-right"></i> 重演当前轮</button>
+        <button class="act-btn-sub" id="we-quick-btn-redo" type="button" ${isRunning || !canRedo || faceSettings.engineEnabled === false ? 'disabled' : ''} title="${canRedo ? '重演当前轮次' : '暂无存档点，请先向前推演'}"><i class="fa-solid fa-rotate-right"></i> 重演当前轮</button>
         <button class="act-inject-switch ${injectOn ? 'is-on' : ''}" id="we-quick-btn-inject" type="button" title="点击切换世界提示词注入状态"><i class="fa-solid fa-bolt"></i> ${injectOn ? '注入已开' : '注入已关'}</button>
       `;
 
@@ -1750,11 +1765,11 @@ window.WORLD_ENGINE_UI = (function() {
       const injectOn = memorySettings.injectIntoPrompt !== false;
       const mainBtnHtml = isRunning
         ? `<button class="act-btn-main act-btn-abort" id="we-quick-btn-abort" type="button" title="停止记忆任务"><i class="fa-solid fa-stop"></i> 停止任务</button>`
-        : `<button class="act-btn-main" id="we-quick-btn-memory-extract" type="button" title="从最新对话手动提取记忆"><i class="fa-solid fa-brain"></i> 提取记忆</button>`;
+        : `<button class="act-btn-main" id="we-quick-btn-memory-extract" type="button" ${faceSettings.engineEnabled === false ? 'disabled' : ''} title="从最新对话手动提取记忆"><i class="fa-solid fa-brain"></i> 提取记忆</button>`;
 
       actionBar.innerHTML = `
         ${mainBtnHtml}
-        <button class="act-btn-sub" id="we-quick-btn-memory-overview" type="button" title="手动执行阶段性总述归并"><i class="fa-solid fa-book-open"></i> 生成总述</button>
+        <button class="act-btn-sub" id="we-quick-btn-memory-overview" type="button" ${isRunning || faceSettings.engineEnabled === false ? 'disabled' : ''} title="手动执行阶段性总述归并"><i class="fa-solid fa-book-open"></i> 生成总述</button>
         <button class="act-inject-switch ${injectOn ? 'is-on' : ''}" id="we-quick-btn-inject" type="button" title="点击切换记忆提示词注入状态"><i class="fa-solid fa-bolt"></i> ${injectOn ? '注入已开' : '注入已关'}</button>
       `;
 
@@ -1768,9 +1783,11 @@ window.WORLD_ENGINE_UI = (function() {
           overviewBtn.disabled = true;
           try {
             showToast('正在生成记忆总述...');
-            await window.MEMORY_ENGINE?.manualBigSummary?.();
+            if (!window.MEMORY_ENGINE?.manualBigSummary) throw new Error('记忆引擎尚未就绪');
+            await window.MEMORY_ENGINE.manualBigSummary();
+            showToast('总述完成');
           } catch(e) {
-            console.error(e);
+            showToast('总述失败：' + (e?.message || e), true);
           } finally {
             overviewBtn.disabled = false;
             refresh();
@@ -1805,7 +1822,6 @@ window.WORLD_ENGINE_UI = (function() {
       _engineFace = target.id;
       applyEngineFaceTheme();
       syncBallFace();
-    updateDashboardChrome();
       panelElement.classList.remove('we-panel-flip-out');
       panelElement.classList.add('we-panel-flip-in');
       refresh();
@@ -1886,6 +1902,20 @@ window.WORLD_ENGINE_UI = (function() {
     return !!(active && panelBodyElement && panelBodyElement.contains(active) && active.isContentEditable);
   }
 
+  function clearWorldEditing() {
+    editingEvent = editingFaction = editingWind = editingTrend = editingDigest = null;
+    editingEnemy = editingInfluence = editingRI = editingSecret = null;
+  }
+
+  function syncSettingsFooter() {
+    const footer = panelElement?.querySelector('#we-settings-footer');
+    if (!footer) return;
+    const actions = panelBodyElement?.querySelector('.we-settings-save-sticky');
+    footer.replaceChildren();
+    footer.hidden = !actions;
+    if (actions) footer.appendChild(actions);
+  }
+
   function refresh(auto) {
     if (!panelElement || !panelVisible) return;
     updateEngineFaceChrome();
@@ -1904,6 +1934,7 @@ window.WORLD_ENGINE_UI = (function() {
         '<div class="we-empty">该引擎界面加载失败或尚未提供渲染器；其他引擎不受影响。</div>'
       );
       if (currentFace.id === 'memory') updateMemoryPanelHeader();
+      syncSettingsFooter();
       bindEvents(null);
       callEngineFace(currentFace, 'bind', undefined, panelBodyElement);
       return;
@@ -1932,6 +1963,7 @@ window.WORLD_ENGINE_UI = (function() {
     }
 
     updatePanelHeader(s, active.layer);
+    syncSettingsFooter();
     bindEvents(state);
   }
 
@@ -2225,6 +2257,7 @@ window.WORLD_ENGINE_UI = (function() {
   //   date    —— 可选，日期不确定的留月份/年份；
   //   items   —— 该版本改动条目（每条一行，渲染时走 h() 转义）。
   const CHANGELOG = [
+    { version: '3.3.5', date: '2026-11-14', items: ['修复自动推演间隔计数、无开场白首轮及重生成去重；停用后恢复可继续处理已超过间隔的回复。', '修复直接 JSON、文本块等有效 API 响应被误报为空，直连显式关闭流式并兼容 SSE；响应错误保留具体原因和脱敏原文。', '修复离开编辑页后面板不再自动刷新的问题；设置保存栏不再遮挡 API 下拉，任务运行时即时显示停止入口；新增完整启动、实际交互及响应格式回归。'] },
     { version: '3.3.4', date: '2026-10-17', items: ['修复重开面板或切换引擎后，批量更新仍向旧进度节点写入，导致界面停在某个批次的问题。', '每次开始、重试、完成批次时同步当前进度栏和悬浮球；切回世界界面恢复后台更新后的最新批次。', '完成或停止后清理悬浮球旧计数，保留最终提示与可继续的任务；增加完整面板 25 批离线回归。'] },
     { version: '3.3.3', date: '2026-10-17', items: ['修复运行中的请求保留旧 RPM 设置，保存为 0 后仍继续等待的问题；等待中的任务约每秒检查新上限。', '区分全局 RPM 额度等待与供应商限流冷却，显示对应原因；恢复请求时更新旧等待提示。', '记忆引擎升级至 1.2.3，独立应用本引擎最新保存的 RPM；补充运行中修改与真实表单保存回归。'] },
     { version: '3.3.2', date: '2026-10-17', items: ['针对 API 多选时页面卡死或 STATUS_BREAKPOINT 的报告，将原生 details/summary 改为普通按钮控制菜单显隐，移除失焦时自动折叠的处理。', '勾选仅更新已有文本节点，保留选项、焦点与滚动位置；不再重建摘要或重新读取连接库。', '新增完整面板浏览器回归，覆盖世界和记忆界面的连续多选、键盘、外部点击及实际保存；记忆引擎升级至 1.2.2。'] },
@@ -5274,13 +5307,13 @@ window.WORLD_ENGINE_UI = (function() {
 
     // ===== 导航事件 =====
     const backBtn = document.getElementById('we-btn-back');
-    if (backBtn) backBtn.onclick = () => { _currentView = 'home'; refresh(); };
+    if (backBtn) backBtn.onclick = () => { clearWorldEditing(); _currentView = 'home'; refresh(); };
 
     const settingsOpenBtn = document.getElementById('we-btn-settings-open');
     if (settingsOpenBtn) settingsOpenBtn.onclick = () => {
       const face = getEngineFace();
       if (typeof face.openSettings === 'function') face.openSettings();
-      else if (face.id === 'world') _currentView = _currentView === 'settings' ? 'home' : 'settings';
+      else if (face.id === 'world') { clearWorldEditing(); _currentView = _currentView === 'settings' ? 'home' : 'settings'; }
       refresh();
     };
 
@@ -5289,6 +5322,7 @@ window.WORLD_ENGINE_UI = (function() {
         if (_selectedNavView === row.dataset.view) {
           // 二次点击：进入分页
           _selectedNavView = null;
+          clearWorldEditing();
           _currentView = row.dataset.view;
           refresh();
         } else {
@@ -6711,7 +6745,7 @@ window.WORLD_ENGINE_UI = (function() {
     handle.style.cursor = 'grab';
 
     handle.addEventListener('mousedown', function(e) {
-      if (e.target.closest('.we-panel-close') || e.target.closest('.we-panel-corner-actions') || e.target.closest('.we-engine-face-toggle') || e.target.closest('.we-segmented-switch')) return;
+      if (e.target.closest('.we-panel-close') || e.target.closest('.we-panel-corner-actions') || e.target.closest('.we-engine-face-toggle') || e.target.closest('.we-segmented-switch') || e.target.closest('.we-header-mode')) return;
       dragging = true;
       const rect = panel.getBoundingClientRect();
       startX = e.clientX; startY = e.clientY;
@@ -6914,6 +6948,7 @@ window.WORLD_ENGINE_UI = (function() {
     _evolving = !!active;
     if (active && scope) _evolvingScope = scope;
     updateBallControls();
+    updateDashboardChrome();
   }
 
   function setMemoryEvolvingUI(active, label) {
@@ -6921,6 +6956,7 @@ window.WORLD_ENGINE_UI = (function() {
     const status = document.getElementById('we-memory-task-status');
     if (status) status.textContent = active ? `正在进行${_memoryRunningLabel}` : '当前没有运行中的记忆任务';
     updateBallControls();
+    updateDashboardChrome();
   }
 
   function setInjectedScope(scope) {
@@ -7416,7 +7452,6 @@ window.WORLD_ENGINE_UI = (function() {
       document.body.appendChild(btn);
       wireSatellites(btn);
       syncBallFace();
-    updateDashboardChrome();
       applyBallPos(btn);
       makeBallDraggable(btn);
       window.addEventListener('resize', () => applyBallPos(btn));

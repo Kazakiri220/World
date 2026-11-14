@@ -369,9 +369,7 @@ window.WORLD_ENGINE_API = (function() {
       const result = await service.sendRequest(profile.id, body.messages, body.max_tokens,
         { stream: false, signal: requestSignal, extractData: true, includePreset: false, includeInstruct: false },
         { temperature: body.temperature });
-      const content = typeof result === 'string' ? result : result?.content;
-      if (typeof content !== 'string' || !content.trim()) throw new Error('酒馆连接返回了空内容');
-      return content;
+      return requireResponseText(result, { text: errorText(result) }, '酒馆连接');
     }, signal, settings.apiTimeoutMs);
   }
 
@@ -433,12 +431,99 @@ window.WORLD_ENGINE_API = (function() {
     });
   }
 
+  function structuredAnswer(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+    const arrays = ['events', 'factions', 'worldTrends', 'winds', 'enemies', 'influenceChain', 'personal_memory', 'entity_updates'];
+    const strings = ['world_digest', 'small_summary', 'big_summary'];
+    const objects = ['economy', 'reputation', 'blackbox', 'regionalIncident'];
+    const matches = arrays.some(key => Array.isArray(value[key])) || strings.some(key => typeof value[key] === 'string')
+      || objects.some(key => value[key] && typeof value[key] === 'object' && !Array.isArray(value[key]));
+    // 仅接受引擎自身的答案结构，未知 HTTP 对象仍应报错并保留原文。
+    return matches ? JSON.stringify(value) : '';
+  }
+
+  // 只读取答案文本；thinking/reasoning、工具参数及其他元数据不能冒充最终答案。
+  function textParts(value) {
+    if (typeof value === 'string') return value;
+    if (!Array.isArray(value)) return structuredAnswer(value);
+    return value.map(part => {
+      if (typeof part === 'string') return part;
+      if (!part || part.thought === true || (part.type && !['text', 'output_text'].includes(part.type))) return '';
+      return typeof part.text === 'string' ? part.text : typeof part.text?.value === 'string' ? part.text.value : '';
+    }).join('');
+  }
+
+  function responseText(data, depth = 0) {
+    if (depth > 3 || data == null) return '';
+    if (typeof data === 'string' || Array.isArray(data)) return textParts(data);
+    const choice = data.choices?.[0];
+    const candidates = [textParts(choice?.message?.content), textParts(choice?.text), textParts(choice?.delta?.content),
+      textParts(data.content), textParts(data.output_text), textParts(data.text)];
+    if (Array.isArray(data.output)) candidates.push(data.output.filter(item => item?.type === 'message')
+      .map(item => textParts(item.content)).join(''));
+    if (Array.isArray(data.candidates)) candidates.push(textParts(data.candidates[0]?.content?.parts));
+    const text = candidates.find(value => value.trim());
+    if (text) return text;
+    // 一些转发层把完整响应包在 data/response 中。只解包已知包装，不遍历任意字段。
+    return structuredAnswer(data) || responseText(data.data, depth + 1) || responseText(data.response, depth + 1);
+  }
+
+  function requireResponseText(data, result, label = 'API') {
+    if (data?.error) throw responseError({ ...result, resp: result.resp || {}, data }, label);
+    const text = responseText(data);
+    const choice = data?.choices?.[0];
+    if (choice?.finish_reason === 'length') console.warn('[世界引擎] API 输出达到长度上限，将读取截断前已完整返回的字段');
+    if (text.trim()) return text;
+    const message = choice?.message || choice?.delta || {};
+    const refusal = message.refusal || (Array.isArray(data?.content) ? data.content.find(part => part?.type === 'refusal')?.refusal : '');
+    const reasoning = message.reasoning_content || message.reasoning || data?.reasoning_content
+      || (Array.isArray(data?.content) && data.content.some(part => part?.type === 'thinking'));
+    const reason = refusal ? '模型拒绝返回答案：' + errorText(refusal)
+      : reasoning ? '模型仅返回推理内容，未返回最终答案' + (choice?.finish_reason === 'length' ? '（输出已达到长度上限）' : '')
+      : !result.text?.trim() ? '返回空内容'
+      : '已返回数据，但未找到可读取的答案文本（响应字段：' + Object.keys(data || {}).slice(0, 12).join(', ') + '）';
+    throw Object.assign(new Error(label + ' ' + reason), { responseBody: result.text, status: result.resp?.status });
+  }
+
+  function parseEventStream(text) {
+    let content = '', snapshot = '', fields = [], reasoning = '', finishReason;
+    const dispatch = () => {
+      if (!fields.length) return;
+      const payload = fields.join('\n'); fields = [];
+      if (payload.trim() === '[DONE]') return;
+      const event = JSON.parse(payload);
+      if (event.error || event.type === 'error') throw new Error('API 流式响应错误：' + errorText(event.error || event));
+      const choice = event.choices?.[0];
+      finishReason = choice?.finish_reason || finishReason;
+      reasoning += choice?.delta?.reasoning_content || '';
+      if (choice?.delta) content += textParts(choice.delta.content);
+      else if (event.type === 'response.output_text.delta' || event.type === 'content_block_delta') {
+        content += textParts(event.delta?.text ?? event.delta);
+      } else {
+        const value = responseText(event);
+        // 完整 message/response 是最终快照；Gemini 的 parts 与旧 completions.text 是增量。
+        if (choice?.text || event.candidates) content += value;
+        else if (value) snapshot = value;
+      }
+    };
+    for (const line of text.split(/\r\n|\n|\r/)) {
+      if (!line) dispatch();
+      else if (line.startsWith('data:')) fields.push(line.slice(5).replace(/^ /, ''));
+    }
+    dispatch();
+    return { choices: [{ message: { content: snapshot || content, reasoning_content: reasoning }, finish_reason: finishReason }] };
+  }
+
   async function readResponseBody(resp) {
     const text = await resp.text();
     let data = null;
     let parseError = null;
     if (text) {
-      try { data = JSON.parse(text); } catch (e) { parseError = e; }
+      try {
+        const body = text.replace(/^\uFEFF/, '').trim();
+        data = /text\/event-stream/i.test(resp.headers?.get?.('content-type') || '') || /^(?:data:|event:|:)/.test(body)
+          ? parseEventStream(body) : JSON.parse(body);
+      } catch (e) { parseError = e; }
     }
     return { resp, data, text, parseError };
   }
@@ -510,14 +595,7 @@ window.WORLD_ENGINE_API = (function() {
     if (data && data.error) {
       throw responseError(result, '酒馆代理');
     }
-    const choice = data.choices?.[0];
-    if (!choice) throw Object.assign(new Error('API 返回缺少 choices[0]'), { responseBody: result.text, status: resp.status });
-    if (choice.finish_reason === 'length') {
-      console.warn('[世界引擎] API 输出达到长度上限，将读取截断前已完整返回的字段');
-    }
-    const content = choice.message?.content;
-    if (typeof content !== 'string' || !content.trim()) throw Object.assign(new Error('API 返回空内容'), { responseBody: result.text, status: resp.status });
-    return content;
+    return requireResponseText(data, result);
   }
 
   /**
@@ -573,7 +651,8 @@ window.WORLD_ENGINE_API = (function() {
       model: settings.model || 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: prompt }],
       temperature: Number.isFinite(Number(selectedTemperature)) ? Math.max(0, Number(selectedTemperature)) : 0.7,
-      max_tokens: selectedMaxTokens
+      max_tokens: selectedMaxTokens,
+      stream: false
     };
 
     if (settings.apiSource === 'tavern') return callTavernProfile(settings, body, signal);
@@ -608,14 +687,7 @@ window.WORLD_ENGINE_API = (function() {
 
     const data = requireJson(result, 'API');
     if (data.error) throw responseError(result, 'API');
-    const choice = data.choices?.[0];
-    if (!choice) throw Object.assign(new Error('API 返回缺少 choices[0]'), { responseBody: result.text, status: resp.status });
-    if (choice.finish_reason === 'length') {
-      console.warn('[世界引擎] API 输出达到长度上限，将读取截断前已完整返回的字段');
-    }
-    const content = choice.message?.content;
-    if (typeof content !== 'string' || !content.trim()) throw Object.assign(new Error('API 返回空内容'), { responseBody: result.text, status: resp.status });
-    return content;
+    return requireResponseText(data, result);
   }
 
   function repairTruncatedJSON(content) {
