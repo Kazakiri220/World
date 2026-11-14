@@ -80,6 +80,20 @@ async function main() {
   assert.equal(await api.callApi('prompt', 100, 0.1, null, settings), answer);
   console.log('✓ SSE deltas, final snapshots, incorrect content type and UTF-8 BOM');
 
+  response = { id: 'chatcmpl-fixture', object: 'chat.completion', created: 1794669979,
+    model: 'chat.deepseek.com', choices: [{ index: 0,
+      message: { role: 'assistant', content: '', media: [] }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, media: [] };
+  for (const connectionMode of ['direct', 'proxy']) {
+    const before = requests.length;
+    await assert.rejects(api.callApi('prompt', 100, 0.1, null, { ...settings, connectionMode }),
+      error => error.status === 200 && /返回空正文.*token 用量全为 0.*finish_reason=stop/.test(error.message)
+        && !error.message.includes('未找到可读取的答案文本'));
+    assert.equal(requests.length, before + 1, 'classifying an empty response must not add retries');
+    assert.deepEqual(JSON.parse(api.getApiErrors()[0].body), response, 'retain the original empty response');
+  }
+  console.log('✓ reported HTTP 200 / empty content / zero-token response is classified precisely without retrying');
+
   response = { choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: '只有推理过程 fixture-secret' } }] };
   await assert.rejects(api.callApi('prompt', 100, 0.1, null, settings), /仅返回推理内容.*长度上限/);
   assert.ok(!api.getApiErrors()[0].body.includes('fixture-secret'), 'raw failure bodies still redact credentials');

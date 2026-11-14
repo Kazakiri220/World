@@ -478,8 +478,16 @@ window.WORLD_ENGINE_API = (function() {
     const refusal = message.refusal || (Array.isArray(data?.content) ? data.content.find(part => part?.type === 'refusal')?.refusal : '');
     const reasoning = message.reasoning_content || message.reasoning || data?.reasoning_content
       || (Array.isArray(data?.content) && data.content.some(part => part?.type === 'thinking'));
+    const emptyMessage = Object.prototype.hasOwnProperty.call(message, 'content')
+      && (message.content == null || (typeof message.content === 'string' && !message.content.trim())
+        || (Array.isArray(message.content) && !message.content.length))
+      && !message.tool_calls?.length && !message.function_call;
+    const zeroUsage = data?.usage && ['prompt_tokens', 'completion_tokens', 'total_tokens'].every(key => data.usage[key] === 0);
     const reason = refusal ? '模型拒绝返回答案：' + errorText(refusal)
       : reasoning ? '模型仅返回推理内容，未返回最终答案' + (choice?.finish_reason === 'length' ? '（输出已达到长度上限）' : '')
+      : emptyMessage ? '返回空正文（message.content 为空'
+        + (zeroUsage ? '；token 用量全为 0' : '')
+        + (choice?.finish_reason ? '；finish_reason=' + choice.finish_reason : '') + '）'
       : !result.text?.trim() ? '返回空内容'
       : '已返回数据，但未找到可读取的答案文本（响应字段：' + Object.keys(data || {}).slice(0, 12).join(', ') + '）';
     throw Object.assign(new Error(label + ' ' + reason), { responseBody: result.text, status: result.resp?.status });
